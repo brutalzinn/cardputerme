@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Start the Cardputer <-> Claude Code bridge server.
+# The server auto-discovers the newest Claude Code session, so just:
+#   1) start Claude in a tmux session:  tmux new -s claude ; claude
+#   2) run this script:                 ./bin/cardputer-server
+set -e
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT/server"
+[ -d node_modules ] || npm install --no-audit --no-fund
+exec node server.js

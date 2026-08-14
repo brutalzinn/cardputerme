@@ -1,0 +1,17 @@
+{
+  "name": "cardputer-claude-server",
+  "version": "1.0.0",
+  "description": "Bridge server between an M5Stack Cardputer ADV and Claude Code running in a tmux session on the Mac Mini.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.21.3"
+  }
+}

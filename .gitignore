@@ -1,0 +1,25 @@
+# Node
+node_modules/
+npm-debug.log*
+.env
+
+# Local machine-specific settings (contains your paths; copy from config.example.json)
+server/config.json
+
+# PlatformIO / firmware build artifacts & caches
+.pio/
+firmware/**/.pio/
+*.bin
+*.elf
+*.o
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Roadmap skill local knowledge (never committed)
+llm/
+
+# Logs / scratch
+*.log
