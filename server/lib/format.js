@@ -34,9 +34,10 @@ function wrapLine(line, cols) {
       out.push(word.slice(0, cols));
       word = word.slice(cols);
     }
-    if (!cur) cur = word;
-    else if (cur.length + 1 + word.length <= cols) cur += ' ' + word;
-    else { out.push(cur); cur = word; }
+    if (!cur) { cur = word; continue; }
+    if (cur.length + 1 + word.length <= cols) { cur += ' ' + word; continue; }
+    out.push(cur);
+    cur = word;
   }
   if (cur) out.push(cur);
   return out.length ? out : [''];

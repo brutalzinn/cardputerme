@@ -1,26 +1,33 @@
 'use strict';
 
 /*
- * Cardputer <-> Claude Code bridge — pure WebSocket for the device.
+ * cardputerme — a generic terminal remote for the M5Cardputer.
  *
- * Claude Code runs inside a tmux session (started in any project folder).
- *   READ : parse Claude's transcript JSONL (clean reply) or raw tmux screen.
- *   WRITE: inject typed commands with `tmux send-keys` (like typing).
- * The Cardputer keeps ONE WebSocket open: cards are pushed down, commands
- * come up, and a notify event fires a sound when Claude replies / asks.
+ * ONE server exposes MANY named terminal sessions over ONE WebSocket. Fully
+ * agnostic: no Claude, no hooks, no regex, no modes. It doesn't matter what runs
+ * in a session (bash, an agent, anything).
+ *   READ : mirror the session's screen (terminal adapter, lib/terminal).
+ *   WRITE: inject keypresses/text (adapter sendText/sendKey).
+ *   DETECT: a "choose one" prompt via a pure algorithm (lib/detect) — the device
+ *           always shows the question and beeps.
+ * The device is a thin renderer: it lists sessions, picks one, renders cards,
+ * and sends keys. The server decides everything shown.
  *
- * HTTP routes (/health, /cards, /command) remain for curl debugging only.
+ * HTTP routes (/health, /sessions, /select, /cards, /command) are for debugging.
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const http = require('http');
-const { execFile } = require('child_process');
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { sliceIntoCards, toAscii } = require('./lib/format');
-const { parseJsonl, extractLatest } = require('./lib/transcript');
+const { sliceIntoCards, toAscii, wrapLine } = require('./lib/format');
+const { parseChoices, endsWithQuestion, trimEnd } = require('./lib/detect');
+const { tmuxBackend, listTmuxSessions } = require('./lib/terminal');
+const { createRegistry } = require('./lib/sessions');
+const { buildDisplay, COLORS } = require('./lib/display');
+const { interpretKey } = require('./lib/input');
+const { parseLine, stripAnsi } = require('./lib/ansi');
 
 // ---- tiny .env loader (no dependency) --------------------------------------
 (function loadEnv() {
@@ -41,274 +48,272 @@ const { parseJsonl, extractLatest } = require('./lib/transcript');
 
 // ---- config ----------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '4711', 10);
-const TMUX_SESSION = process.env.TMUX_SESSION || 'claude';
+// Optional default session to pre-select. The user need NOT know any session
+// name — sessions are auto-discovered and picked on the device. Empty = none.
+const DEFAULT_SESSION = process.env.SESSION || process.env.TMUX_SESSION || '';
 const WRAP_COLS = parseInt(process.env.WRAP_COLS || '20', 10);
 const LINES_PER_CARD = parseInt(process.env.LINES_PER_CARD || '7', 10);
 const SCROLLBACK_LINES = parseInt(process.env.SCROLLBACK_LINES || '200', 10);
 const MAX_CARDS = parseInt(process.env.MAX_CARDS || '40', 10);
-const READ_MODE = (process.env.READ_MODE || 'claude').toLowerCase();
 const NOTIFY = (process.env.NOTIFY || '1') !== '0';
-const CLAUDE_PROJECTS_DIR = process.env.CLAUDE_PROJECTS_DIR || '';
-const CLAUDE_PROJECT = process.env.CLAUDE_PROJECT || '';
 
-function expandTilde(p) {
-  return p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
+// ---- session registry (one server, many named sessions) --------------------
+// The core reads/writes through the SELECTED session's adapter, never a single
+// hard-wired one. Live tmux sessions are auto-registered by name; the device
+// lists them and selects one over the ONE WebSocket (no per-session port).
+// tmux is today's backend; a PTY-owned shell drops in with the same interface.
+const registry = createRegistry();
+function makeBackend(session) {
+  return tmuxBackend({ session, scrollbackLines: SCROLLBACK_LINES });
 }
+let activeSessionName = DEFAULT_SESSION;
+// UI interaction state, driven entirely server-side by the input FSM (lib/input).
+// 'mirror' = showing a session; 'picker' = showing the numbered session menu.
+let uiState = { mode: 'mirror' };
 
-// ---- tmux helpers ----------------------------------------------------------
-function run(cmd, args) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ code: err && typeof err.code === 'number' ? err.code : err ? 1 : 0, stdout: stdout || '', stderr: stderr || '' });
-    });
-  });
-}
-async function sessionExists() {
-  return (await run('tmux', ['has-session', '-t', TMUX_SESSION])).code === 0;
-}
-async function capturePane() {
-  const args = ['capture-pane', '-p', '-t', TMUX_SESSION];
-  if (SCROLLBACK_LINES > 0) args.push('-S', `-${SCROLLBACK_LINES}`);
-  const { code, stdout } = await run('tmux', args);
-  return code === 0 ? stdout : null;
-}
-// Type text then submit — small gap so the TUI registers the text before Enter.
-async function sendToTmux(text) {
-  if ((await run('tmux', ['send-keys', '-t', TMUX_SESSION, '-l', text])).code !== 0) return false;
-  await new Promise((r) => setTimeout(r, 120));
-  return (await run('tmux', ['send-keys', '-t', TMUX_SESSION, 'Enter'])).code === 0;
-}
-
-// ---- transcript discovery (auto-follow newest across all ~/.claude* accounts)
-function candidateProjectRoots() {
-  if (CLAUDE_PROJECTS_DIR) return [expandTilde(CLAUDE_PROJECTS_DIR)];
-  const home = os.homedir();
-  const roots = [];
-  try {
-    for (const name of fs.readdirSync(home)) {
-      if (/^\.claude(-.*)?$/.test(name)) {
-        const p = path.join(home, name, 'projects');
-        try { if (fs.statSync(p).isDirectory()) roots.push(p); } catch { /* skip */ }
-      }
-    }
-  } catch { /* skip */ }
-  return roots;
-}
-// Encode a filesystem path the way Claude Code names its project dir (/ -> -).
-function encodeProject(cwd) {
-  return cwd.replace(/\//g, '-');
-}
-// The cwd of the tmux session the Cardputer controls, so we follow THAT
-// Claude session specifically (not some other active account/session).
-async function tmuxCwd() {
-  const { code, stdout } = await run('tmux', ['display-message', '-p', '-t', TMUX_SESSION, '#{pane_current_path}']);
-  return code === 0 ? stdout.trim() : '';
-}
-
-function findLatestTranscript(preferProject) {
-  const roots = candidateProjectRoots();
-  const pinned = CLAUDE_PROJECT || preferProject || '';
-  // First try the pinned/preferred project; fall back to newest-anywhere.
-  if (pinned) {
-    const hit = newestIn(roots.map((r) => path.join(r, pinned)));
-    if (hit) return hit;
+// Auto-discover live sessions and register any we don't know yet; keep the
+// active selection valid. The user never types a session name — sessions are
+// found here and picked on the device. Cheap; safe to call often.
+async function refreshSessions() {
+  const live = await listTmuxSessions();
+  for (const name of live) {
+    if (registry.has(name)) continue;
+    registry.add(name, makeBackend(name));
   }
-  let best = null, bestMtime = -1;
-  for (const root of roots) {
-    const projDirs = safeSubdirs(root);
-    for (const dir of projDirs) {
-      let entries;
-      try { entries = fs.readdirSync(dir); } catch { continue; }
-      for (const name of entries) {
-        if (!name.endsWith('.jsonl')) continue;
-        const full = path.join(dir, name);
-        try {
-          const st = fs.statSync(full);
-          if (st.mtimeMs > bestMtime) { bestMtime = st.mtimeMs; best = full; }
-        } catch { /* skip */ }
-      }
-    }
-  }
-  return best;
+  // Honor an optional pre-selected default even if it isn't live yet.
+  if (DEFAULT_SESSION && !registry.has(DEFAULT_SESSION)) registry.add(DEFAULT_SESSION, makeBackend(DEFAULT_SESSION));
+  if (!activeSessionName || !registry.has(activeSessionName)) activeSessionName = registry.names()[0] || '';
 }
-function safeSubdirs(root) {
-  try {
-    return fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(root, d.name));
-  } catch { return []; }
-}
-// Newest *.jsonl among the given directories (or null).
-function newestIn(dirs) {
-  let best = null, bestMtime = -1;
-  for (const dir of dirs) {
-    let entries;
-    try { entries = fs.readdirSync(dir); } catch { continue; }
-    for (const name of entries) {
-      if (!name.endsWith('.jsonl')) continue;
-      const full = path.join(dir, name);
-      try {
-        const st = fs.statSync(full);
-        if (st.mtimeMs > bestMtime) { bestMtime = st.mtimeMs; best = full; }
-      } catch { /* skip */ }
-    }
-  }
-  return best;
-}
-// Returns { text, question, assistantCount } or null.
-function readClaudeLatest(preferProject) {
-  const file = findLatestTranscript(preferProject);
-  if (!file) return null;
-  let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
-  const meta = extractLatest(parseJsonl(raw));
-  if (!meta.prompt && !meta.reply) return null;
-  return meta;
+
+// The adapter for the currently-selected session (always defined).
+function activeTerminal() {
+  const entry = registry.get(activeSessionName);
+  if (entry) return entry.backend;
+  return makeBackend(activeSessionName);
 }
 
 // ---- build cards -----------------------------------------------------------
-const NO_SESSION = `No claude session.\nStart it with:\ntmux new -s ${TMUX_SESSION}\nthen run claude inside\nthat project folder.`;
+const NO_SESSION = 'No active session.\nOpen a terminal session\nand pick it on the\ndevice.';
 
-// Claude Code approval / selection prompts (create file? run plan? proceed?)
-// live in the TUI, not the transcript. Detect them from the captured screen so
-// the Cardputer can SEE and ANSWER them (type the option number).
+// Reinterpret the terminal screen for the Cardputer: find a "choose one" prompt
+// (create file? run plan? proceed?) that lives in the TUI, not the transcript.
+// Pure algorithm over the captured text — NO regex, NO hooks, agnostic to what
+// program is running. An option list is 2+ "N. label" / "N) label" lines
+// (lib/detect.parseChoices); the question is the line above them ending in '?'.
+// We ALWAYS include that question line, so the device shows the question, not
+// just the bare options.
 function detectPrompt(pane) {
   if (!pane) return null;
   // ASCII-clean first so the `❯` pointer / box chars don't hide "1. Yes".
-  const lines = toAscii(pane).replace(/\r/g, '').split('\n').map((l) => l.replace(/\s+$/, ''));
+  const lines = toAscii(pane).split('\n').map((l) => trimEnd(l));
   const optIdx = [];
-  for (let i = 0; i < lines.length; i++) if (/^\s*\d+\.\s+\S/.test(lines[i])) optIdx.push(i);
+  for (let i = 0; i < lines.length; i++) if (parseChoices(lines[i]).length > 0) optIdx.push(i);
   if (optIdx.length < 2) return null;               // need a real option list
   let start = optIdx[0];
-  // pull in a question line just above the options, if present
-  for (let i = start - 1; i >= 0 && i >= start - 4; i--) {
+  // Walk up to the question: prefer the nearest line ending in '?', else the
+  // nearest non-empty line. Either way the device always shows the question.
+  for (let i = start - 1; i >= 0 && i >= start - 6; i--) {
     if (!lines[i].trim()) continue;
-    if (/\?|do you want|would you like|select|choose|proceed/i.test(lines[i])) start = i;
-    break;
+    start = i;
+    if (endsWithQuestion(lines[i])) break;          // reached the question line
   }
   let end = optIdx[optIdx.length - 1];
-  if (lines[end + 1] && /esc|tab|enter|cancel/i.test(lines[end + 1])) end += 1;
+  // Include a trailing hint line (esc / enter / cancel / tab) if present.
+  const hint = lines[end + 1] ? lines[end + 1].toLowerCase() : '';
+  if (hint.includes('esc') || hint.includes('enter') || hint.includes('cancel') || hint.includes('tab')) end += 1;
   const text = lines.slice(start, end + 1).filter((l) => l.trim()).join('\n');
   return text.trim() ? text : null;
 }
 
-async function buildState(mode) {
-  const exists = await sessionExists();
-  if (mode === 'claude') {
-    // Interactive prompt on screen? Surface it (so it can be answered) + flag it.
-    if (exists) {
-      const pane = await capturePane();
-      const prompt = detectPrompt(pane);
-      if (prompt) {
-        const cards = sliceIntoCards(prompt, WRAP_COLS, LINES_PER_CARD, MAX_CARDS);
-        return { cards, sessionExists: true, mode: 'prompt', assistantCount: 0, question: true, awaiting: true };
-      }
-    }
-    const cwd = exists ? await tmuxCwd() : '';
-    const meta = readClaudeLatest(cwd ? encodeProject(cwd) : '');
-    if (meta) {
-      const cards = sliceIntoCards(meta.text, WRAP_COLS, LINES_PER_CARD, MAX_CARDS);
-      return { cards: cards.length ? cards : [['(empty)']], sessionExists: exists, mode: 'claude', assistantCount: meta.assistantCount, question: meta.question, awaiting: false };
+// Flatten wrapped text into a capped list of screen lines (newest tail kept) —
+// small enough for the device's WS buffer (large frames crash the ESP32).
+const MAX_LINES = 90;
+function screenLines(text) {
+  const lines = [].concat(...sliceIntoCards(text, WRAP_COLS, LINES_PER_CARD, MAX_CARDS));
+  if (lines.length > MAX_LINES) return lines.slice(lines.length - MAX_LINES);
+  return lines;
+}
+
+// Wrap ANSI-coloured pane rows into capped {text,color} display lines — each
+// wrapped piece keeps its row's terminal colour (mirrored, translated to RGB565).
+function coloredLines(rows) {
+  const out = [];
+  for (const raw of rows) {
+    const { text, color } = parseLine(raw, COLORS.text);
+    for (const piece of wrapLine(toAscii(text).split('\t').join('  '), WRAP_COLS)) {
+      out.push({ text: trimEnd(piece), color });
     }
   }
-  if (!exists) {
-    return { cards: sliceIntoCards(NO_SESSION, WRAP_COLS, LINES_PER_CARD, MAX_CARDS), sessionExists: false, mode: 'raw', assistantCount: 0, question: false, awaiting: false };
+  if (out.length > MAX_LINES) return out.slice(out.length - MAX_LINES);
+  return out;
+}
+
+// Split a captured (ANSI) pane into coloured body lines + a one-line STATUS (the
+// terminal's bottom status row = its last non-empty line, like Claude Code's bar).
+function splitScreen(pane) {
+  const rows = String(pane || '').split('\n');
+  let last = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (stripAnsi(rows[i]).trim()) { last = i; break; }
   }
-  const pane = await capturePane();
-  const cards = sliceIntoCards(pane || '(empty)', WRAP_COLS, LINES_PER_CARD, MAX_CARDS);
-  return { cards: cards.length ? cards : [['(empty)']], sessionExists: exists, mode: 'raw', assistantCount: 0, question: false, awaiting: false };
+  if (last < 0) return { lines: [], status: '' };
+  const status = toAscii(stripAnsi(rows[last])).trim();
+  return { lines: coloredLines(rows.slice(0, last)), status };
+}
+
+// Build the current screen: body lines + a status string. NO modes/transcript;
+// same generic path for every CLI. The device renders this via lib/display.
+async function buildState() {
+  // Picker mode: a plain NUMBERED TEXT menu (Telegram-style); pick by number.
+  if (uiState.mode === 'picker') {
+    const names = registry.names();
+    const menu = ['Pick a session:', ''].concat(names.map((n, i) => `${i + 1}. ${n}`));
+    return { lines: screenLines(menu.join('\n')), status: '` cancel | press a number', sessionExists: true, awaiting: false };
+  }
+
+  const term = activeTerminal();
+  if (!(await term.exists())) {
+    return { lines: screenLines(NO_SESSION), status: 'no active session', sessionExists: false, awaiting: false };
+  }
+  const pane = await term.capture();          // includes ANSI colour escapes (-e)
+  const prompt = detectPrompt(stripAnsi(pane)); // detection runs on plain text
+  if (prompt) {
+    return { lines: screenLines(prompt), status: `[${activeSessionName}] answer the prompt`, sessionExists: true, awaiting: true };
+  }
+  // Mirror: colour body lines from the terminal's OWN colours; extract the status.
+  const { lines, status } = splitScreen(pane);
+  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${status}`, sessionExists: true, awaiting: false };
 }
 
 // ---- HTTP (debugging only) -------------------------------------------------
 const app = express();
 app.use(express.json({ limit: '64kb' }));
-app.get('/health', async (_req, res) => res.json({ ok: true, session: TMUX_SESSION, exists: await sessionExists(), readMode: READ_MODE, notify: NOTIFY }));
-app.get('/cards', async (req, res) => {
-  const st = await buildState((req.query.mode || READ_MODE).toLowerCase());
-  res.json({ total: st.cards.length, mode: st.mode, sessionExists: st.sessionExists, cards: st.cards });
+app.get('/health', async (_req, res) => {
+  await refreshSessions();
+  res.json({ ok: true, active: activeSessionName, sessions: registry.list(), exists: await activeTerminal().exists(), notify: NOTIFY, awaiting: lastAwaiting });
+});
+// The session list + current selection (the device's picker reads this).
+app.get('/sessions', async (_req, res) => {
+  await refreshSessions();
+  res.json({ active: activeSessionName, sessions: registry.list() });
+});
+// Select the active session by name — the user never types a tmux name; they
+// pick from the auto-discovered list.
+app.post('/select', async (req, res) => {
+  const name = req.body && typeof req.body.name === 'string' ? req.body.name : '';
+  await refreshSessions();
+  if (!registry.has(name)) return res.status(404).json({ ok: false, error: `unknown session '${name}'` });
+  activeSessionName = name;
+  pushIfChanged(true).catch(() => {});
+  res.json({ ok: true, active: activeSessionName });
+});
+app.get('/cards', async (_req, res) => {
+  const st = await buildState();
+  res.json({ lines: st.lines.length, status: st.status, sessionExists: st.sessionExists, awaiting: st.awaiting, body: st.lines });
 });
 app.post('/command', async (req, res) => {
   const text = req.body && typeof req.body.text === 'string' ? req.body.text : '';
   if (!text) return res.status(400).json({ ok: false, error: 'missing text' });
-  if (!(await sessionExists())) return res.status(409).json({ ok: false, error: `no tmux session '${TMUX_SESSION}'` });
-  res.json({ ok: await sendToTmux(text), sent: text });
+  const term = activeTerminal();
+  if (!(await term.exists())) return res.status(409).json({ ok: false, error: 'no active session' });
+  res.json({ ok: await term.sendText(text), sent: text });
 });
 
 // ---- WebSocket (the device's only channel) ---------------------------------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-let lastCardsSig = '';
-let lastAssistantCount = 0;
+let lastSig = '';
 let lastAwaiting = false;
 
-function cardsMessage(st) {
-  return JSON.stringify({ type: 'cards', total: st.cards.length, mode: st.mode, sessionExists: st.sessionExists, cards: st.cards });
+// The generic display message (lib/display): body lines with server-chosen
+// colors + a bottom status bar. This is the ONLY screen message the device
+// renders — kept screen-sized so it never overloads the ESP32's WS buffer.
+function displayMessage(st) {
+  return JSON.stringify(buildDisplay(st.lines, st.status, { awaiting: st.awaiting }));
+}
+// The session list + current selection — the device's picker renders this.
+function sessionsMessage() {
+  return JSON.stringify({ type: 'sessions', active: activeSessionName, sessions: registry.list() });
 }
 function broadcast(str) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(str);
 }
 
-// Push new state to all clients when it changes; fire notify on a fresh reply
-// OR when Claude puts up an interactive prompt (needs the user to answer).
+// Push the screen when it changes; beep once when a choose-one prompt appears.
 async function pushIfChanged(force) {
-  const st = await buildState(READ_MODE);
-  const sig = JSON.stringify(st.cards);
-  if (sig !== lastCardsSig || force) {
-    lastCardsSig = sig;
-    broadcast(cardsMessage(st));
+  const st = await buildState();
+  const sig = JSON.stringify(st.lines) + '' + st.status;
+  if (sig !== lastSig || force) {
+    lastSig = sig;
+    broadcast(displayMessage(st));
   }
-  if (NOTIFY) {
-    if (st.awaiting && !lastAwaiting) {
-      broadcast(JSON.stringify({ type: 'notify', reason: 'question' })); // approval/selection appeared
-    } else if (st.assistantCount > lastAssistantCount) {
-      broadcast(JSON.stringify({ type: 'notify', reason: st.question ? 'question' : 'reply' }));
-    }
-  }
-  lastAssistantCount = Math.max(lastAssistantCount, st.assistantCount);
+  const freshQuestion = st.awaiting && !lastAwaiting; // a choose-one prompt appeared on screen
+  if (NOTIFY && freshQuestion) broadcast(JSON.stringify({ type: 'notify', reason: 'question' }));
   lastAwaiting = st.awaiting;
 }
 
-wss.on('connection', async (ws) => {
-  // send current state immediately to the newcomer
-  const st = await buildState(READ_MODE);
-  lastAssistantCount = Math.max(lastAssistantCount, st.assistantCount);
-  ws.send(cardsMessage(st));
+wss.on('connection', async (ws, req) => {
+  const who = (req && req.socket && req.socket.remoteAddress) || '?';
+  console.log(`[ws] connect ${who} (clients=${wss.clients.size})`);
+  ws.on('close', (code, reason) => console.log(`[ws] close ${who} code=${code} ${String(reason || '')}`));
+  ws.on('error', (e) => console.log(`[ws] error ${who} ${e && e.message}`));
+  // Send the session list + current screen immediately to the newcomer.
+  await refreshSessions();
+  const st = await buildState();
+  ws.send(sessionsMessage());
+  ws.send(displayMessage(st));
 
   ws.on('message', async (data) => {
     let m; try { m = JSON.parse(data.toString()); } catch { return; }
-    if (m && m.type === 'cmd' && typeof m.text === 'string') {
-      // Answering an on-screen menu: a lone digit picks the option (no Enter,
-      // Claude's selector acts on the keypress). Otherwise type + submit.
-      if (lastAwaiting && /^\d$/.test(m.text.trim())) {
-        await run('tmux', ['send-keys', '-t', TMUX_SESSION, '-l', m.text.trim()]);
-      } else {
-        await sendToTmux(m.text);
-      }
-      setTimeout(() => pushIfChanged(true).catch(() => {}), 500);
+    if (!m || typeof m.type !== 'string') return;
+
+    // Pick a session by name (from the device's picker).
+    if (m.type === 'selectSession' && typeof m.name === 'string') {
+      await refreshSessions();
+      if (!registry.has(m.name)) return;
+      activeSessionName = m.name;
+      ws.send(sessionsMessage());
+      pushIfChanged(true).catch(() => {});
+      return;
+    }
+    // Ask for the current session list.
+    if (m.type === 'listSessions') {
+      await refreshSessions();
+      ws.send(sessionsMessage());
+      return;
+    }
+    // Send input to the active session. A lone digit picks a menu option (no
+    // Enter — the CLI's selector acts on the keypress); anything else is typed +
+    // submitted. Single-digit test is a plain char check (no regex).
+    // Every key the device forwards is interpreted HERE (server-side) by the
+    // pure FSM (lib/input) — the device special-cases nothing. Backtick is Esc:
+    // `=Escape to the terminal, ``=open picker; in the picker a number selects a
+    // session. Otherwise a digit answers an on-screen menu, or text is typed.
+    if (m.type === 'cmd' && typeof m.text === 'string') {
+      const { state, action } = interpretKey(uiState, m.text, { sessions: registry.names(), awaiting: lastAwaiting });
+      uiState = state;
+      const term = activeTerminal();
+      if (action.kind === 'select') activeSessionName = action.name;
+      if (action.kind === 'escape') await term.sendKey('Escape');
+      if (action.kind === 'answerMenu') await term.sendKey(action.key);
+      if (action.kind === 'type') await term.sendText(action.text);
+      // openPicker / closePicker / select / none: buildState reflects uiState below.
+      setTimeout(() => pushIfChanged(true).catch(() => {}), 300);
+      return;
     }
   });
 });
 
-// Event-driven: watch each transcript root; debounce a burst of writes.
-let debounce = null;
-function scheduledPush() {
-  clearTimeout(debounce);
-  debounce = setTimeout(() => pushIfChanged(false).catch(() => {}), 150);
-}
-for (const root of candidateProjectRoots()) {
-  try { fs.watch(root, { recursive: true }, scheduledPush); } catch { /* skip */ }
-}
-// Server-side tick (NOT device polling): catches TUI-only changes that emit no
-// file event — approval prompts, selection menus, live streaming. Only the
-// server touches tmux; the Cardputer just receives pushes over its socket.
+// Server-side tick (NOT device polling): catches screen changes that emit no
+// event — prompts, menus, live streaming. The Cardputer just receives pushes.
 setInterval(() => { if (wss.clients.size) pushIfChanged(false).catch(() => {}); }, 800);
 // Keep sockets alive with a periodic ping.
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 20000);
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Cardputer<->Claude bridge on http://0.0.0.0:${PORT}  (ws://…/ws)`);
-  console.log(`  tmux session : ${TMUX_SESSION}`);
-  console.log(`  cards        : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines`);
-  console.log(`  read mode    : ${READ_MODE} | notify: ${NOTIFY ? 'on' : 'off'}`);
-  const roots = candidateProjectRoots();
-  console.log(`  transcripts  : ${CLAUDE_PROJECTS_DIR || 'auto (' + roots.length + ' account dir(s))'}`);
+server.listen(PORT, '0.0.0.0', async () => {
+  console.log(`cardputerme — terminal remote on http://0.0.0.0:${PORT}  (ws://…/ws)`);
+  console.log(`  cards  : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines | notify: ${NOTIFY ? 'on' : 'off'}`);
+  await refreshSessions();
+  console.log(`  sessions: ${registry.names().join(', ') || '(none yet)'} | active: ${activeSessionName || '(none)'}`);
 });

@@ -1,19 +1,21 @@
 /*
- * Cardputer ADV  <->  Claude Code remote
+ * cardputerme — thin frontend for the generic terminal remote
  * -------------------------------------------------------------------
- * Reads Claude Code's output (paged into legible "cards") from the Node.js
- * bridge on the Mac Mini, and sends commands typed on the physical keyboard.
+ * A PURE renderer: it draws the screen the server sends (a generic "display"
+ * message = body lines each with their own color + a bottom status bar) and
+ * forwards keys. It holds NO content logic — colors, status, menus and meaning
+ * are all decided by the server. So new screens/colors need a server change, not
+ * a re-flash.
  *
  * Board:   M5Stack Cardputer ADV (StampS3A / ESP32-S3FN8), 240x135 ST7789V2.
  * Library: M5Cardputer (auto-detects Cardputer vs ADV via M5Unified).
  *
  * UI
- *   VIEW mode (default): shows one card of Claude's output.
- *     ;  -> previous card        .  -> next card
- *     `  -> refresh              any letter/key -> start typing a command
- *   INPUT mode: type a command on the keyboard.
- *     Enter -> POST it to the server, then refresh
- *     `     -> cancel back to VIEW           (del = backspace)
+ *   VIEW mode (default): shows one page of the session screen.
+ *     ;  -> previous page        .  -> next page
+ *     any letter/key -> start typing a command
+ *   INPUT mode: type; Enter sends it over the socket. (del = backspace)
+ *   The `esc` key sends `; the SERVER interprets it (` = Esc, `` = picker).
  * -------------------------------------------------------------------
  */
 
@@ -25,7 +27,6 @@
 
 // ===================================================================
 // All settings come from firmware/.env (injected as -DENV_* at build).
-// Fallbacks below are only used if a key is missing from .env.
 #ifndef ENV_WIFI_SSID
 #define ENV_WIFI_SSID "YOUR_WIFI_SSID"
 #endif
@@ -47,38 +48,42 @@ const char* WIFI_PASS = ENV_WIFI_PASS;
 const char* WS_HOST   = ENV_WS_HOST;
 const int   WS_PORT   = ENV_WS_PORT;
 const char* WS_PATH   = "/ws";
-const int   WRAP_COLS = ENV_WRAP_COLS;   // must match server .env
+const int   WRAP_COLS = ENV_WRAP_COLS;
 // ===================================================================
 
 // Screen geometry (Cardputer ADV = 240x135)
 #define SCR_W       240
 #define SCR_H       135
 #define HEADER_H    14        // top status bar height
-#define BODY_TOP    16        // first body text baseline area
+#define STATUS_H    16        // bottom status bar height
+#define INPUT_H     18        // command entry bar height (INPUT mode only)
 #define LINE_H      16        // size-2 font line height (12x16 px glyphs)
 #define SBAR_W      3         // right-edge scroll indicator width
 
-// Coherent dark theme (RGB565)
-#define COL_BG      0x0000    // black — max legibility
-#define COL_HDR     0x10A2    // dark slate header bar
-#define COL_TEXT    0xFFFF    // white — Claude reply text
-#define COL_ACCENT  0x07FF    // cyan — mode / accents
-#define COL_PROMPT  0xFFE0    // yellow — the "> your prompt" lines
+// Chrome colors (RGB565) the firmware owns. BODY colors come FROM THE SERVER,
+// per line — the device never decides content color.
+#define COL_BG      0x0000    // black
+#define COL_HDR     0x10A2    // dark slate bars
+#define COL_TEXT    0xFFFF    // white (fallback only)
+#define COL_ACCENT  0x07FF    // cyan
 #define COL_DIM     0x8410    // grey — hints / scrollbar track
 #define COL_OK      0x07E6    // green — wifi ok / toast
 #define COL_WARN    0xFD20    // orange — no wifi / errors
 
-// NOTE: don't use bare INPUT/OUTPUT here — they are reserved Arduino GPIO macros.
+// NOTE: don't use bare INPUT/OUTPUT here — reserved Arduino GPIO macros.
 enum Mode { MODE_VIEW, MODE_INPUT };
 Mode mode = MODE_VIEW;
 
-std::vector<std::vector<String>> g_cards;
-int  g_index = 0;
-bool g_sessionExists = false;
+// The server sends body lines (each with its own color) + a status string.
+struct Line { String text; uint16_t color; };
+std::vector<Line> g_lines;
+String   g_status = "";
+uint16_t g_statusColor = COL_ACCENT;
+bool     g_sessionExists = false;
+int      g_page = 0;
 
-// Auto-scroll: when `follow` is true we jump to the newest card as Claude's
-// reply grows (so the Cardputer mirrors Claude live). Paging up turns it off;
-// paging back to the last card turns it on again.
+// follow=true keeps us on the newest page as output grows. Paging up turns it
+// off; paging back to the last page turns it on again.
 bool follow = true;
 
 WebSocketsClient webSocket;
@@ -95,6 +100,19 @@ void showToast(const String& msg, uint16_t ms = 1200) {
 }
 
 bool wifiUp() { return WiFi.status() == WL_CONNECTED; }
+
+int bodyBottom() {
+  return SCR_H - STATUS_H - (mode == MODE_INPUT ? INPUT_H : 0);
+}
+int linesPerPage() {
+  int n = (bodyBottom() - HEADER_H) / LINE_H;
+  return n < 1 ? 1 : n;
+}
+int pageCount() {
+  int lpp = linesPerPage();
+  int n = ((int)g_lines.size() + lpp - 1) / lpp;
+  return n < 1 ? 1 : n;
+}
 
 void connectWifi() {
   M5Cardputer.Display.fillScreen(COL_BG);
@@ -113,7 +131,7 @@ void connectWifi() {
 }
 
 // ------------------------------------------------------------------ drawing
-// Colored top bar: [wifi][mode] .......... [toast]  [card i/total]
+// Top bar: [wifi][mode] .......... [toast]  [page i/total]
 void drawHeader() {
   auto& d = M5Cardputer.Display;
   d.fillRect(0, 0, SCR_W, HEADER_H, COL_HDR);
@@ -125,73 +143,83 @@ void drawHeader() {
   d.setTextColor(COL_ACCENT, COL_HDR);
   d.print(mode == MODE_INPUT ? " CMD" : " VIEW");
 
-  // transient toast, centered-ish
   if (millis() < toastUntil && toast.length()) {
     d.setTextColor(COL_OK, COL_HDR);
     d.setCursor(66, 4);
     d.print(toast);
   }
 
-  // right: card position
   d.setTextColor(COL_TEXT, COL_HDR);
-  String pos = String(g_cards.empty() ? 0 : g_index + 1) + "/" + String((int)g_cards.size());
+  String pos = String(g_lines.empty() ? 0 : g_page + 1) + "/" + String(pageCount());
   d.setCursor(SCR_W - (int)pos.length() * 6 - 3, 4);
   d.print(pos);
 }
 
-// Right-edge scroll indicator showing which card we're on within the whole reply.
+// Right-edge scroll indicator: which page within the whole screen.
 void drawScrollbar() {
   auto& d = M5Cardputer.Display;
-  int total = (int)g_cards.size();
-  int top = HEADER_H + 1, bot = SCR_H - 1;
+  int total = pageCount();
+  int top = HEADER_H + 1, bot = bodyBottom() - 1;
   int h = bot - top;
-  d.fillRect(SCR_W - SBAR_W, top, SBAR_W, h, COL_HDR);       // track
+  d.fillRect(SCR_W - SBAR_W, top, SBAR_W, h, COL_HDR);
   if (total <= 1) return;
   int thumbH = h / total; if (thumbH < 4) thumbH = 4;
-  int y = top + (int)((long)(h - thumbH) * g_index / (total - 1));
-  d.fillRect(SCR_W - SBAR_W, y, SBAR_W, thumbH, COL_ACCENT);  // thumb
+  int y = top + (int)((long)(h - thumbH) * g_page / (total - 1));
+  d.fillRect(SCR_W - SBAR_W, y, SBAR_W, thumbH, COL_ACCENT);
 }
 
-// Body fills the whole screen below the header. In INPUT mode the last 18px
-// are reserved for the command line, so the reply scrolls above it.
+// Body: the current page of server-colored lines.
 void drawBody() {
   auto& d = M5Cardputer.Display;
-  int bodyBottom = (mode == MODE_INPUT) ? (SCR_H - 18) : SCR_H;
-  d.fillRect(0, HEADER_H, SCR_W - SBAR_W, bodyBottom - HEADER_H, COL_BG);
+  int bb = bodyBottom();
+  d.fillRect(0, HEADER_H, SCR_W - SBAR_W, bb - HEADER_H, COL_BG);
   d.setTextSize(2);
 
-  if (g_cards.empty()) {
+  if (g_lines.empty()) {
     d.setTextColor(COL_DIM, COL_BG);
     d.setCursor(4, HEADER_H + 20);
-    d.print("(no data - ` refresh)");
+    d.print("(no data)");
     drawScrollbar();
     return;
   }
 
-  const auto& card = g_cards[g_index];
+  int lpp = linesPerPage();
+  int start = g_page * lpp;
   int y = HEADER_H + 2;
-  for (const auto& line : card) {
-    if (y + LINE_H > bodyBottom) break;
-    // Highlight the "> your prompt" lines vs Claude's reply text.
-    bool isPrompt = line.startsWith("> ");
-    d.setTextColor(isPrompt ? COL_PROMPT : COL_TEXT, COL_BG);
+  for (int i = start; i < start + lpp && i < (int)g_lines.size(); i++) {
+    if (y + LINE_H > bb) break;
+    d.setTextColor(g_lines[i].color, COL_BG);   // color chosen by the SERVER
     d.setCursor(3, y);
-    d.print(line);
+    d.print(g_lines[i].text);
     y += LINE_H;
   }
   drawScrollbar();
 }
 
-// Command entry bar pinned to the bottom (only shown in INPUT mode).
+// Bottom status bar (always shown) — server-composed text, clipped to one line.
+void drawStatusBar() {
+  auto& d = M5Cardputer.Display;
+  int y0 = SCR_H - STATUS_H;
+  d.fillRect(0, y0, SCR_W, STATUS_H, COL_HDR);
+  d.setTextSize(1);
+  d.setTextColor(g_statusColor, COL_HDR);
+  d.setCursor(3, y0 + 4);
+  String s = g_status;
+  const int maxChars = 39;                 // ~6px/char at size 1 across 240px
+  if ((int)s.length() > maxChars) s = s.substring(0, maxChars);
+  d.print(s);
+}
+
+// Command entry bar, just above the status bar (INPUT mode only).
 void drawInputBar() {
   auto& d = M5Cardputer.Display;
-  int y0 = SCR_H - 18;
-  d.fillRect(0, y0, SCR_W, 18, COL_HDR);
+  int y0 = SCR_H - STATUS_H - INPUT_H;
+  d.fillRect(0, y0, SCR_W, INPUT_H, COL_HDR);
   d.setTextSize(2);
   d.setTextColor(COL_ACCENT, COL_HDR);
   d.setCursor(2, y0 + 2);
   String shown = inputBuf;
-  const int maxChars = 19;                 // fits 240px at size 2
+  const int maxChars = 19;
   if ((int)shown.length() > maxChars) shown = shown.substring(shown.length() - maxChars);
   d.print(">");
   d.print(shown);
@@ -201,44 +229,46 @@ void drawInputBar() {
 void redraw() {
   drawHeader();
   drawBody();
+  drawStatusBar();
   if (mode == MODE_INPUT) drawInputBar();
 }
 
 // ------------------------------------------------------------------ network
-// Short beep(s) so the user knows Claude produced output or needs an answer.
 void beep(bool question) {
-  if (question) {                         // rising two-tone = "Claude needs you"
+  if (question) {
     M5Cardputer.Speaker.tone(1200, 90);
     delay(110);
     M5Cardputer.Speaker.tone(1900, 140);
-  } else {                                // single soft tone = new reply
-    M5Cardputer.Speaker.tone(1600, 70);
+    return;
   }
+  M5Cardputer.Speaker.tone(1600, 70);
 }
 
-// Render a pushed {type:"cards"} message. follow=true auto-scrolls to newest.
-void applyCards(JsonDocument& doc) {
-  g_sessionExists = doc["sessionExists"] | false;
-  JsonArray cards = doc["cards"].as<JsonArray>();
+// Render a pushed {type:"display"} message: body lines (each with a color) + a
+// status bar. follow=true keeps us on the newest page.
+void applyDisplay(JsonDocument& doc) {
+  g_sessionExists = doc["sessionExists"] | true;
+  JsonObject status = doc["status"];
+  g_status = String((const char*)(status["text"] | ""));
+  g_statusColor = (uint16_t)((uint32_t)(status["color"] | (uint32_t)COL_ACCENT));
 
-  int prevIdx = g_index;
-  int prevTotal = (int)g_cards.size();
-
-  g_cards.clear();
-  for (JsonArray card : cards) {
-    std::vector<String> lines;
-    for (JsonVariant v : card) lines.push_back(String((const char*)v));
-    g_cards.push_back(lines);
+  int prevPage = g_page, prevPages = pageCount();
+  g_lines.clear();
+  JsonArray body = doc["body"].as<JsonArray>();
+  for (JsonObject o : body) {
+    Line ln;
+    ln.text = String((const char*)(o["text"] | ""));
+    ln.color = (uint16_t)((uint32_t)(o["color"] | (uint32_t)COL_TEXT));
+    g_lines.push_back(ln);
   }
-
-  int total = (int)g_cards.size();
-  if (follow || prevIdx >= prevTotal) g_index = total ? total - 1 : 0;
-  else if (g_index > total - 1)       g_index = total ? total - 1 : 0;
+  int pages = pageCount();
+  bool atNewest = follow || prevPage >= prevPages;
+  if (atNewest || g_page > pages - 1) g_page = pages ? pages - 1 : 0;
   redraw();
 }
 
-// The only channel the device uses: a persistent WebSocket. Server pushes
-// {type:"cards"|"notify"}; device sends {type:"cmd"}.
+// Persistent WebSocket: server pushes {type:"display"|"notify"|"sessions"};
+// device sends {type:"cmd"}. The server decides everything shown.
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
@@ -255,15 +285,16 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       JsonDocument doc;
       if (deserializeJson(doc, payload, length)) return;
       const char* t = doc["type"] | "";
-      if (strcmp(t, "cards") == 0) {
-        applyCards(doc);
-      } else if (strcmp(t, "notify") == 0) {
+      if (strcmp(t, "display") == 0) { applyDisplay(doc); return; }
+      if (strcmp(t, "notify") == 0) {
         bool q = (strcmp(doc["reason"] | "", "question") == 0);
         beep(q);
-        showToast(q ? "Claude asks!" : "New reply");
+        showToast(q ? "Answer needed" : "New output");
         drawHeader();
+        return;
       }
-      break;
+      // {type:"sessions"} — the picker is rendered server-side as a display; ignore.
+      return;
     }
     default:
       break;
@@ -272,7 +303,6 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 
 // Send a typed command up to the server over the same socket.
 void sendCommand(const String& text) {
-  if (!text.length()) return;
   if (!wsConnected) { showToast("No link"); redraw(); return; }
   JsonDocument doc;
   doc["type"] = "cmd";
@@ -286,23 +316,24 @@ void sendCommand(const String& text) {
 // ------------------------------------------------------------------ input
 void handleViewKey(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
-    if (c == ';') {                       // up -> previous card (stop following)
-      if (g_index > 0) g_index--;
+    if (c == ';') {                       // up -> previous page (stop following)
+      if (g_page > 0) g_page--;
       follow = false;
       redraw();
       return;
-    } else if (c == '.') {                // down -> next card
-      if (g_index + 1 < (int)g_cards.size()) g_index++;
-      if (g_index >= (int)g_cards.size() - 1) follow = true;  // at newest -> follow again
-      redraw();
-      return;
-    } else {                              // any other key -> start a command
-      mode = MODE_INPUT;
-      inputBuf = "";
-      inputBuf += c;
+    }
+    if (c == '.') {                       // down -> next page
+      if (g_page + 1 < pageCount()) g_page++;
+      if (g_page >= pageCount() - 1) follow = true;
       redraw();
       return;
     }
+    // any other key -> start a command (incl. `esc`/backtick; the server reads it)
+    mode = MODE_INPUT;
+    inputBuf = "";
+    inputBuf += c;
+    redraw();
+    return;
   }
   if (st.enter) {                         // Enter alone -> start an empty command
     mode = MODE_INPUT;
@@ -325,12 +356,12 @@ void handleInputKey(const Keyboard_Class::KeysState& st) {
     String cmd = inputBuf;
     inputBuf = "";
     mode = MODE_VIEW;
-    follow = true;                        // auto-scroll to Claude's incoming reply
+    follow = true;
     sendCommand(cmd);
     redraw();
     return;
   }
-  if (changed) drawInputBar();            // cheap partial redraw while typing
+  if (changed) drawInputBar();
 }
 
 // ------------------------------------------------------------------ Arduino
@@ -344,7 +375,6 @@ void setup() {
 
   connectWifi();
 
-  // Pure WebSocket: the only channel for cards (down) and commands (up).
   webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
   webSocket.onEvent(onWsEvent);
   webSocket.setReconnectInterval(3000);
@@ -354,15 +384,15 @@ void setup() {
 
 void loop() {
   M5Cardputer.update();
-  webSocket.loop();                       // pump the socket (no polling)
+  webSocket.loop();
 
   if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
-    if (mode == MODE_VIEW) handleViewKey(st);
-    else                   handleInputKey(st);
+    Mode m0 = mode;                       // capture first — handleViewKey may switch to INPUT
+    if (m0 == MODE_VIEW) handleViewKey(st);
+    if (m0 == MODE_INPUT) handleInputKey(st);
   }
 
-  // Clear an expired toast without a redraw storm.
   static bool toastWasShown = false;
   bool toastShowing = (millis() < toastUntil) && toast.length();
   if (toastWasShown && !toastShowing) drawHeader();
