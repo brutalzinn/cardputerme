@@ -226,14 +226,24 @@ func (s *Server) buildState() stateResult {
 	if !ok {
 		return stateResult{lines: s.screenLines(noSession), status: "terminal gone"}
 	}
-	tail := strings.Split(screen.StripAnsi(pane), "\n")
-	if len(tail) > promptTailRows {
-		tail = tail[len(tail)-promptTailRows:]
-	}
-	awaiting := detectPromptAwaiting(strings.Join(tail, "\n"))
 	grid, status := splitScreen(pane)
+	// Detect a prompt over the SAME blank-trimmed content the device shows (the
+	// grid + status row), not the raw tail — a menu with blank lines below it
+	// would otherwise fall outside the last-N raw rows and be missed.
+	awaiting := detectPromptAwaiting(gridTail(grid, status))
 	s.cache = &mirrorCache{grid: grid, status: status, awaiting: awaiting}
 	return s.composeMirror(grid, status, awaiting)
+}
+
+func gridTail(grid []screen.Line, status string) string {
+	from := max(0, len(grid)-promptTailRows)
+	var sb strings.Builder
+	for _, l := range grid[from:] {
+		sb.WriteString(l.Text)
+		sb.WriteByte('\n')
+	}
+	sb.WriteString(status)
+	return sb.String()
 }
 
 func displayMessage(st stateResult) string {
@@ -317,10 +327,10 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[ws] close %s", c.RemoteAddr())
 	}()
 
-	s.mu.Lock()
-	msg := displayMessage(s.buildState())
-	s.mu.Unlock()
-	s.hub.sendTo(c, msg)
+	// Force an initial push so the newcomer gets the screen AND lastAwaiting is
+	// synced — otherwise a digit answering a prompt that was already on screen at
+	// connect time would wrongly land in the input buffer.
+	s.pushIfChanged(true)
 
 	for {
 		_, data, err := c.ReadMessage()

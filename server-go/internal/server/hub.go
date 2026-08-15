@@ -46,9 +46,3 @@ func (h *hub) broadcast(msg string) {
 		}
 	}
 }
-
-func (h *hub) sendTo(c *websocket.Conn, msg string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	c.WriteMessage(websocket.TextMessage, []byte(msg))
-}
