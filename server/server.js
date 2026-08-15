@@ -119,11 +119,10 @@ function splitScreen(pane) {
 }
 
 async function buildState() {
-  const term = activeTerminal();
-  if (!(await term.exists())) {
+  const pane = await activeTerminal().capture();
+  if (pane === null) {
     return { lines: screenLines(NO_SESSION), status: 'terminal gone', sessionExists: false, awaiting: false };
   }
-  const pane = await term.capture();
 
   const plain = stripAnsi(pane);
   const tail = plain.split('\n').slice(-PROMPT_TAIL_ROWS).join('\n');
