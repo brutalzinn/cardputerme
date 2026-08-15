@@ -161,14 +161,13 @@ make release    # cross-compile CLI binaries into dist/ (macOS + Linux)
 
 `make release` builds static binaries for macOS and Linux (amd64 + arm64) into `dist/`. On a machine with no Go toolchain, drop the matching `dist/cardputerme-<os>-<arch>` binary in place and `bin/cardputer-server` uses it instead of building.
 
-**Cutting a release.** Push a tag, then manually run the **Release** GitHub Action with that tag:
+**Cutting a release.** Push a `v*` tag — that is the whole process:
 
 ```
 git tag v0.1.0 && git push origin v0.1.0
-# then: Actions → Release → Run workflow → tag: v0.1.0
 ```
 
-The workflow (`.github/workflows/release.yml`) checks out the tag, cross-compiles, and publishes a GitHub Release with the four binaries. (`make release-publish VERSION=vX.Y.Z` does the same locally if you'd rather use `gh`.)
+The push triggers `.github/workflows/release.yml`, which builds each platform on its own runner (macOS Apple Silicon, macOS Intel, Linux), tests there, then merges the artifacts, writes `checksums.txt` and publishes the GitHub Release. No manual step. **Run workflow** still exists to rebuild an existing tag — re-runs replace the assets in place. (`make release-publish VERSION=vX.Y.Z` does the same locally if you'd rather use `gh`.)
 
 Or drive the server directly:
 

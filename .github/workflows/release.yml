@@ -1,14 +1,20 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and publish (must already be pushed, e.g. v0.1.0)"
+        description: "Existing tag to rebuild and publish (e.g. v0.1.0) — only needed to re-run a release"
         required: true
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -27,10 +33,10 @@ jobs:
             name: linux
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout the tag
+      - name: Checkout ${{ env.TAG }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -54,10 +60,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the tag
+      - name: Checkout ${{ env.TAG }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
 
       - name: Collect every platform's binaries
         uses: actions/download-artifact@v4
@@ -69,4 +75,4 @@ jobs:
       - name: Checksum and publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: make release-upload VERSION=${{ inputs.tag }}
+        run: make release-upload VERSION=${{ env.TAG }}

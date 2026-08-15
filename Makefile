@@ -6,6 +6,13 @@ PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 PIO := $(shell command -v pio 2>/dev/null || echo $(HOME)/.platformio/penv/bin/pio)
 SHA256 := $(shell command -v sha256sum 2>/dev/null || echo "shasum -a 256")
 
+define NEWLINE
+
+
+endef
+
+RELEASE_NOTES := Install: curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh$(NEWLINE)$(NEWLINE)Native builds — macOS (Intel + Apple Silicon) and Linux (amd64 + arm64), static (CGO off) so any Ubuntu version works. Requires tmux at runtime.
+
 .DEFAULT_GOAL := help
 .PHONY: help setup test build flash release release-checksums release-upload release-publish clean
 
@@ -47,10 +54,12 @@ release-checksums:
 	cd $(DIST) && rm -f checksums.txt && $(SHA256) cardputerme* > checksums.txt
 
 release-upload: release-checksums
-	gh release create $(VERSION) $(DIST)/* --title "cardputerme $(VERSION)" \
-		--notes "Install: \`curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh\`
-
-Native builds: macOS Intel + Apple Silicon, Linux amd64 + arm64. Static (CGO off) — runs on any Ubuntu/glibc version. Requires \`tmux\` at runtime."
+	@if gh release view $(VERSION) >/dev/null 2>&1; then \
+		echo "release $(VERSION) already exists — replacing its assets"; \
+		gh release upload $(VERSION) $(DIST)/* --clobber; \
+	else \
+		gh release create $(VERSION) $(DIST)/* --title "cardputerme $(VERSION)" --notes "$(RELEASE_NOTES)"; \
+	fi
 
 release-publish: release release-upload
 
