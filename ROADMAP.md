@@ -1,27 +1,28 @@
 # cardputerme — Roadmap
-> Updated 2026-08-15. Focus: **finish device E2E (#8)** — verify the remaining checklist on the Cardputer. Terse; `git log` holds detail.
+> Updated 2026-08-15. Focus: **terminal fidelity (#14)** — mirror the terminal's exact colors + layout. Terse; `git log` holds detail. **#8 E2E user-verified on hardware — the whole system works.**
 
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) builds+execs a **Go binary** that runs a background WS server for that ONE terminal on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device listens, lists every live exposure (**IPv4:port + name**), and connects to the one you pick. NO sessions concept, NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. Thin device: draws the server-described display, forwards raw keys; server owns everything (input, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
 
-## Focus — finish device E2E
-The server is done, restructured, and proven at parity (71 tests). The whole system already works on hardware: the Cardputer discovers, connects, mirrors, drives the live Claude Code session, answers prompts, and zooms. "Done" = every remaining checklist item eyeballed on the physical device, fixing server-side as issues surface.
+## Focus — terminal fidelity (SSH-parity)
+The whole system is verified working on hardware (E2E user-confirmed): discover, connect, mirror, drive, answer prompts, history, autosuggest, marquee, zoom. The last north-star gap is **exactness** — the device should show the terminal's OWN colors and layout, indistinguishable from ssh but for screen size. "Done" = colors match a real terminal side-by-side across ≥2 CLIs.
 
 ## 🎯 Now
-Current: **#8 device E2E** — resume the remaining on-device checklist (zoom just verified). Fix each failure (server-side preferred; flash only for firmware).
+Current: **#14 terminal-fidelity pass** — audit colors + layout vs a real terminal; extend `ansi.go` where needed.
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
 
-**📅 Day 1 — 2026-08-15 · Device E2E**
-8. 🟡 **E2E verification (user-run).** *(current)* CORE PASSING on hardware: device 192.168.0.69 discovered via beacon → connected → mirrored → ran commands → drove live Claude Code → answered a prompt. **3 bugs E2E caught + fixed:** beacon subnet-directed broadcast (`652d4f7`); prompt detection over the blank-trimmed grid the device shows (not raw last-N rows); `lastAwaiting` syncs on client connect (digit answers a prompt already on screen). Remaining to eyeball: history recall (ctrl+up/down), autosuggest dim ghost legibility + Tab-accept (folds in #13 UX), status marquee, fn+esc back to picker. (Zoom ✅ verified: ctrl+=/ctrl+_/ctrl+space.) Harness: `ask` exposure runs a live `1/2/3` menu.
-> 🚀 **Deploy (end of Day 1)** — remaining checklist passes on the device.
+**📅 Day 1 — 2026-08-15 · Fidelity (SSH-parity)**
+14. 🟡 **Terminal-fidelity pass.** *(current)* #14a bold→bright done (`ansi.go`). Remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + plain bash `ls --color`); extend `internal/screen/ansi.go` coverage where colors diverge; decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; README truth-pass. Server-only, TDD.
+> 🚀 **Deploy (end of Day 1)** — colors faithful side-by-side; layout mirrors the terminal; docs true.
 
-**📅 Day 2 — 2026-08-16 · Fidelity + polish**
-14. ⬜ **Terminal-fidelity pass (SSH-parity).** #14a bold→bright done (`ansi.go`); remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + `ls --color`); decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; README truth-pass. Server-only, TDD.
-> 🚀 **Deploy (end of Day 2)** — colors faithful; layout mirrors the terminal; docs true.
+**📅 Day 2 — 2026-08-16 · Parked items, as chosen**
+- ⬜ Pull one item from Parked only if it becomes the focus (WIP=1). Otherwise the roadmap is essentially complete.
+> 🚀 **Deploy (end of Day 2)** — n/a until a task is promoted.
 
 ## Done 2026-08-15 (Go era)
+- **#8 Device E2E — user-verified on hardware.** Full checklist confirmed working on the Cardputer: beacon discovery → WS connect → mirror → run commands → drive live Claude Code → answer prompts → history recall → autosuggest ghost + Tab → marquee → fn+esc back → zoom. 3 bugs E2E caught+fixed: beacon subnet-broadcast (`652d4f7`), grid-based prompt detection, awaiting-on-connect.
 - **#11 Zoom (server-owned text size) — verified on device.** Display msg carries `size` (one font, `setTextSize` scales); **ctrl+= / ctrl+_** (Cardputer +/-) zoom in/out, **ctrl+space** resets; viewport `cols()`/`rows()` derive inversely from size (1↔3, size 2 baseline). History recall stays on ctrl+up/down; nav (fn/opt+arrows) unchanged. Firmware flashed; zoom confirmed working on hardware.
 - **#16 Conventional Go CLI layout + on-device fixes.** `server-go/` → `cmd/cardputerme/main.go` + `internal/{screen,input,discovery,terminal,server}`; `Server` struct replaces globals; JS `server/` removed; dead code purged (`EndsWithQuestion`, `hub.sendTo`), `deadcode`+`go vet` clean; 67 tests across packages. On-device fixes: grid-based prompt detection, awaiting-on-connect, beacon subnet-broadcast, WS connect logging.
 - **#15 Go rewrite (very fast, event-driven, no polling).** tmux `pipe-pane`→fifo change-signal (session death on stream close, zero timers); regex-free; gorilla/websocket; wire integration test (real tmux + gorilla client). JS retired (−658 files).
