@@ -37,6 +37,20 @@ func isDigits(text string) bool {
 
 var arrows = map[string]bool{"up": true, "down": true, "left": true, "right": true}
 
+// suggest returns the newest history entry that extends the current input, or
+// "" when there is none — the basis for autosuggest + Tab-accept.
+func suggest(input string, history []string) string {
+	if input == "" {
+		return ""
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] != input && strings.HasPrefix(history[i], input) {
+			return history[i]
+		}
+	}
+	return ""
+}
+
 func splitMod(k string) (mod, base string) {
 	i := strings.IndexByte(k, '+')
 	if i <= 0 {
@@ -115,6 +129,9 @@ func interpretKey(state State, key string, ctx KeyCtx) Result {
 		return quiet(mirror(input[:len(input)-1], hist))
 	}
 	if key == "tab" {
+		if s := suggest(input, ctx.History); s != "" {
+			return quiet(mirror(s, -1))
+		}
 		return press(state, "tab")
 	}
 	if arrows[key] {

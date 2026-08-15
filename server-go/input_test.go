@@ -86,6 +86,34 @@ func TestTab(t *testing.T) {
 	}
 }
 
+func TestSuggest(t *testing.T) {
+	h := []string{"git status", "git commit", "make build"}
+	if suggest("git c", h) != "git commit" {
+		t.Fatal("newest matching prefix")
+	}
+	if suggest("git commit", h) != "" {
+		t.Fatal("exact match is not a suggestion")
+	}
+	if suggest("", h) != "" || suggest("zzz", h) != "" {
+		t.Fatal("no match")
+	}
+}
+
+func TestTabAcceptsSuggestion(t *testing.T) {
+	h := []string{"git status", "git commit"}
+	r := interpretKey(mir("git c"), "tab", KeyCtx{History: h})
+	if r.Action.Kind != "none" || r.State.Input != "git commit" {
+		t.Fatalf("accept got %+v", r)
+	}
+}
+
+func TestTabPassesThroughWithoutSuggestion(t *testing.T) {
+	r := interpretKey(mir("xyz"), "tab", KeyCtx{History: []string{"git status"}})
+	if r.Action.Kind != "pressKey" || r.Action.Key != "tab" {
+		t.Fatalf("passthrough got %+v", r)
+	}
+}
+
 func TestOptArrows(t *testing.T) {
 	r := interpretKey(mir(""), "opt+up", KeyCtx{Awaiting: true})
 	if r.Action.Kind != "pressKey" || r.Action.Key != "up" {

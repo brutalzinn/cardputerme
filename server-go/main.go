@@ -187,6 +187,13 @@ func (s *Session) composeMirror(grid []Line, status string, awaiting bool) state
 		for _, piece := range composed[from:] {
 			lines = append(lines, Line{Text: piece, Color: colors.Prompt})
 		}
+		if g := suggest(s.input, s.history); g != "" {
+			ghost := []rune(g)
+			if len(ghost) > wrapCols {
+				ghost = ghost[:wrapCols]
+			}
+			lines = append(lines, Line{Text: string(ghost), Color: colors.Dim})
+		}
 	}
 	hint := status
 	if awaiting {

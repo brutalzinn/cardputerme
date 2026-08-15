@@ -3,12 +3,13 @@ package main
 import "strings"
 
 var colors = struct {
-	Text, Prompt, Ask, Status uint16
+	Text, Prompt, Ask, Status, Dim uint16
 }{
 	Text:   0xFFFF,
 	Prompt: 0xFFE0,
 	Ask:    0xFD20,
 	Status: 0x07FF,
+	Dim:    0x8410,
 }
 
 func lineColor(text string, awaiting bool) uint16 {

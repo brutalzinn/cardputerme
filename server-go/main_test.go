@@ -97,3 +97,12 @@ func TestComposeMirrorShowsInputBuffer(t *testing.T) {
 		t.Fatalf("input line %+v", last)
 	}
 }
+
+func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
+	s := &Session{view: View{Follow: true, SelRow: -1}, hist: -1, input: "git c", history: []string{"git commit"}}
+	st := s.composeMirror([]Line{{Text: "prev", Color: colors.Text}}, "", false)
+	last := st.lines[len(st.lines)-1]
+	if last.Text != "git commit" || last.Color != colors.Dim {
+		t.Fatalf("ghost line %+v", last)
+	}
+}
