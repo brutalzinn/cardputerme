@@ -79,3 +79,22 @@ func TestParseLineBoldBrightens(t *testing.T) {
 		t.Fatalf("plain 31 got %#x want normal red %#x", col, sys16[1])
 	}
 }
+
+func TestParseLineBoldBrightensRegardlessOfOrder(t *testing.T) {
+	_, col := ParseLine(esc+"[31;1mX", 0xFFFF)
+	if col != sys16[9] {
+		t.Fatalf("31;1 got %#x want bright red %#x", col, sys16[9])
+	}
+	_, col = ParseLine(esc+"[34m"+esc+"[1mX", 0xFFFF)
+	if col != sys16[12] {
+		t.Fatalf("34m then 1m before text got %#x want bright blue %#x", col, sys16[12])
+	}
+	_, col = ParseLine(esc+"[1;31;22mX", 0xFFFF)
+	if col != sys16[1] {
+		t.Fatalf("1;31;22 (unbolded) got %#x want normal red %#x", col, sys16[1])
+	}
+	_, col = ParseLine(esc+"[1;38;5;196mX", 0xFFFF)
+	if col != Xterm256(196) {
+		t.Fatalf("bold + 256-color got %#x want %#x (256 unaffected by bold)", col, Xterm256(196))
+	}
+}

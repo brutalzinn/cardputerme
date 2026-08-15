@@ -49,22 +49,35 @@ func partAt(parts []string, i int) int {
 	return atoiDefault(parts[i])
 }
 
-// applySGR folds one escape's SGR params into the running (fg, bold) state.
-// Bold brightens the 8 basic colors (30-37 -> 90-97), matching how most
-// terminals render bold+color, so the device mirrors what you actually see.
-func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bool) {
+// effectiveColor resolves the running SGR state to the color a terminal shows.
+// A basic color (30-37, tracked as basic 0-7) brightens to 90-97 while bold is
+// active — regardless of whether bold arrived before or after the color, or in
+// a separate escape — matching how terminals render bold+color.
+func effectiveColor(fg uint16, bold bool, basic int) uint16 {
+	if bold && basic >= 0 {
+		return sys16[basic+8]
+	}
+	return fg
+}
+
+// applySGR folds one escape's SGR params into the running (fg, bold, basic)
+// state. basic is the 30-37 index (0-7) when fg came from a basic color, else
+// -1; it lets bold brighten the color at render time, order-independently.
+func applySGR(params string, curFg uint16, curBold bool, curBasic int, def uint16) (uint16, bool, int) {
 	parts := splitByte(params, ';')
 	if params == "" {
 		parts = []string{"0"}
 	}
 	fg := curFg
 	bold := curBold
+	basic := curBasic
 	k := 0
 	for k < len(parts) {
 		n := partAt(parts, k)
 		if n == 0 {
 			fg = def
 			bold = false
+			basic = -1
 			k++
 			continue
 		}
@@ -80,20 +93,19 @@ func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bo
 		}
 		if n == 39 {
 			fg = def
+			basic = -1
 			k++
 			continue
 		}
 		if n >= 30 && n <= 37 {
-			if bold {
-				fg = sys16[n-30+8]
-			} else {
-				fg = sys16[n-30]
-			}
+			basic = n - 30
+			fg = sys16[basic]
 			k++
 			continue
 		}
 		if n >= 90 && n <= 97 {
 			fg = sys16[n-90+8]
+			basic = -1
 			k++
 			continue
 		}
@@ -101,11 +113,13 @@ func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bo
 			mode := partAt(parts, k+1)
 			if mode == 5 {
 				fg = Xterm256(partAt(parts, k+2))
+				basic = -1
 				k += 3
 				continue
 			}
 			if mode == 2 {
 				fg = RGB565(partAt(parts, k+2), partAt(parts, k+3), partAt(parts, k+4))
+				basic = -1
 				k += 5
 				continue
 			}
@@ -114,7 +128,7 @@ func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bo
 		}
 		k++
 	}
-	return fg, bold
+	return fg, bold, basic
 }
 
 func isFinalByte(c byte) bool {
@@ -125,6 +139,7 @@ func ParseLine(raw string, def uint16) (string, uint16) {
 	var text []byte
 	curFg := def
 	curBold := false
+	curBasic := -1
 	lineColor := def
 	colorSet := false
 	n := len(raw)
@@ -137,7 +152,7 @@ func ParseLine(raw string, def uint16) (string, uint16) {
 				j++
 			}
 			if j < n && raw[j] == 'm' {
-				curFg, curBold = applySGR(raw[i+2:j], curFg, curBold, def)
+				curFg, curBold, curBasic = applySGR(raw[i+2:j], curFg, curBold, curBasic, def)
 			}
 			i = j + 1
 			continue
@@ -148,7 +163,7 @@ func ParseLine(raw string, def uint16) (string, uint16) {
 		}
 		text = append(text, c)
 		if !colorSet && c != ' ' {
-			lineColor = curFg
+			lineColor = effectiveColor(curFg, curBold, curBasic)
 			colorSet = true
 		}
 		i++
