@@ -27,7 +27,15 @@ The device is a thin renderer: the server owns the input buffer, history, viewpo
 
 ## Install
 
-**Requirements:** Go ≥ 1.26 (the launcher builds the server on first run) and `tmux` (`brew install tmux`) — the invisible capture backend; you never interact with it directly.
+**Requirement:** `tmux` (`brew install tmux` / `apt install tmux`) — the invisible capture backend; you never interact with it directly.
+
+```
+curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh
+```
+
+Grabs the matching binary from the latest [GitHub Release](https://github.com/brutalzinn/cardputerme/releases), verifies its checksum and installs `cardputerme` into `/usr/local/bin` (or `~/.local/bin` when that is not writable). Builds are native per platform — **macOS Intel and Apple Silicon, Linux amd64 and arm64** — and static (CGO off), so they run on any Ubuntu/glibc version. Pin a version with `CARDPUTERME_VERSION=v0.0.2`, or choose the target with `CARDPUTERME_BIN_DIR=~/bin`.
+
+**From source** (needs Go ≥ 1.26 — the launcher builds the server on first run):
 
 ```
 git clone <repo> && cd cardputerme

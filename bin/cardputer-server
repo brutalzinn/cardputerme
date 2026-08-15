@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -e
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
 DIR="$PWD"
-NAME="${1:-${SESSION:-$(basename "$PWD")}}"
+NAME="${1:-${NAME:-$(basename "$PWD")}}"
+TMUX_SESSION="${TMUX_SESSION:-$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "$NAME")}"
 STATE="${CARDPUTERME_DIR:-$HOME/.cardputerme}"
 mkdir -p "$STATE"
 PID_FILE="$STATE/$NAME.pid"
@@ -21,16 +23,22 @@ case "$(uname -m)" in
   *) ARCH="" ;;
 esac
 PREBUILT="$ROOT/dist/cardputerme-$OS-$ARCH"
-if [ -n "$OS" ] && [ -n "$ARCH" ] && [ -x "$PREBUILT" ]; then
+if [ -n "$CARDPUTERME_BIN" ] && [ -x "$CARDPUTERME_BIN" ]; then
+  BIN="$CARDPUTERME_BIN"
+elif [ -x "$HERE/cardputerme-server" ]; then
+  BIN="$HERE/cardputerme-server"
+elif command -v cardputerme-server >/dev/null 2>&1; then
+  BIN="$(command -v cardputerme-server)"
+elif [ -n "$OS" ] && [ -n "$ARCH" ] && [ -x "$PREBUILT" ]; then
   BIN="$PREBUILT"
-elif command -v go >/dev/null 2>&1; then
+elif command -v go >/dev/null 2>&1 && [ -d "$ROOT/server-go" ]; then
   (cd "$ROOT/server-go" && go build -o cardputerme ./cmd/cardputerme)
   BIN="$ROOT/server-go/cardputerme"
 else
-  echo "cardputerme — no prebuilt binary for $OS/$ARCH and Go is not installed." >&2
-  echo "  install Go, or drop a release binary at $PREBUILT" >&2
+  echo "cardputerme — no cardputerme-server binary for $OS/$ARCH on PATH." >&2
+  echo "  install it: curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh" >&2
   exit 1
 fi
-SESSION="$NAME" SESSION_CWD="$DIR" nohup "$BIN" >>"$STATE/$NAME.log" 2>&1 &
+SESSION_CWD="$DIR" TMUX_SESSION="$TMUX_SESSION" nohup "$BIN" "$NAME" >>"$STATE/$NAME.log" 2>&1 &
 echo "$!" >"$PID_FILE"
 echo "cardputerme — exposing '$NAME' (find it on the Cardputer) | log: $STATE/$NAME.log"

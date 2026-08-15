@@ -5,11 +5,25 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"cardputerme/internal/server"
 )
+
+func sessionName(args []string, env func(string) string, cwd string) string {
+	if len(args) > 0 && args[0] != "" {
+		return args[0]
+	}
+	if v := env("NAME"); v != "" {
+		return v
+	}
+	if cwd != "" {
+		return filepath.Base(cwd)
+	}
+	return "cardputerme"
+}
 
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
@@ -29,9 +43,12 @@ func envStr(key, def string) string {
 
 func main() {
 	log.SetFlags(0)
+	cwd, _ := os.Getwd()
+	name := sessionName(os.Args[1:], os.Getenv, envStr("SESSION_CWD", cwd))
 	cfg := server.Config{
-		Name:            envStr("SESSION", "cardputerme"),
-		SessionCwd:      os.Getenv("SESSION_CWD"),
+		Name:            name,
+		Session:         envStr("TMUX_SESSION", envStr("SESSION", name)),
+		SessionCwd:      envStr("SESSION_CWD", cwd),
 		WrapCols:        envInt("WRAP_COLS", 20),
 		LinesPerCard:    envInt("LINES_PER_CARD", 7),
 		ScrollbackLines: envInt("SCROLLBACK_LINES", 200),

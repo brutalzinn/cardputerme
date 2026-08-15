@@ -36,6 +36,7 @@ const (
 // Config is everything the CLI passes in; there are no package globals.
 type Config struct {
 	Name            string
+	Session         string
 	SessionCwd      string
 	WrapCols        int
 	LinesPerCard    int
@@ -92,10 +93,17 @@ const (
 	sizeMax  = 3
 )
 
+func tmuxTarget(cfg Config) string {
+	if cfg.Session != "" {
+		return cfg.Session
+	}
+	return cfg.Name
+}
+
 func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
-		backend:  terminal.CreateBackend(cfg.Name, cfg.ScrollbackLines),
+		backend:  terminal.CreateBackend(tmuxTarget(cfg), cfg.ScrollbackLines),
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		view:     screen.View{Follow: true, SelRow: -1},
