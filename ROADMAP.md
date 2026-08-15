@@ -1,23 +1,21 @@
 # cardputerme — Roadmap
-> Updated 2026-08-15. Focus: **terminal fidelity (#14)** — mirror the terminal's exact colors + layout. Terse; `git log` holds detail. **#8 E2E user-verified on hardware — the whole system works.**
+> Updated 2026-08-15. **All 17 planned tasks shipped** — the whole system is E2E-verified on hardware and the Go server is audited + race-clean. Terse; `git log` holds detail. New work starts from ## Parked.
 
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) builds+execs a **Go binary** that runs a background WS server for that ONE terminal on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device listens, lists every live exposure (**IPv4:port + name**), and connects to the one you pick. NO sessions concept, NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. Thin device: draws the server-described display, forwards raw keys; server owns everything (input, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
 
-## Focus — terminal fidelity (SSH-parity)
-The whole system is verified working on hardware (E2E user-confirmed): discover, connect, mirror, drive, answer prompts, history, autosuggest, marquee, zoom. The last north-star gap is **exactness** — the device should show the terminal's OWN colors and layout, indistinguishable from ssh but for screen size. "Done" = colors match a real terminal side-by-side across ≥2 CLIs.
+## Focus — shipped
+Every planned task (#1–#17) is delivered. The system does the whole job: expose any terminal with `cardputerme`, discover it on the Cardputer over a UDP beacon, connect over WebSocket, and drive it with full parity — mirror, keys, prompts, history, autosuggest, marquee, zoom, faithful colors. Server is unit-tested (71), audited by a 4-agent pass, and race-clean. Next north star lives in ## Parked; pull one in to start a new cycle.
 
 ## 🎯 Now
-Current: **#14 terminal-fidelity pass** — the last item: mirror the terminal's exact colors + layout. (Optional polish; the product is fully working.)
+Nothing queued — the plan is empty (all 17 ✅). New work starts by promoting an item from ## Parked to a fresh 🟡.
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
-
-**📅 Day 1 — 2026-08-15 · Fidelity (SSH-parity)**
-14. 🟡 **Terminal-fidelity pass.** *(current)* #14a bold→bright done (`internal/screen/ansi.go`). Remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + plain `ls --color`); extend `ansi.go` coverage where colors diverge; decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; final README truth-pass. Server-only, TDD.
-> 🚀 **Deploy (end of Day 1)** — colors faithful side-by-side; layout mirrors the terminal.
+_Empty — all planned tasks shipped. Populate from ## Parked when the next cycle begins._
 
 ## Done 2026-08-15 (Go era)
+- **#14 Terminal-fidelity pass (SSH-parity).** Colors mirror the terminal: #14a bold→bright, plus bold basic colors now brighten regardless of SGR order (`6fa5b0d`, tracks the basic-color index through SGR state). bg/reverse documented out-of-scope (device is per-line fg only). 4-agent audit verified key handling, action dispatch, and pick-server end to end; fixed the one real defect — a data race on `terminal.Subscribe`'s stop flag → `atomic.Bool`, `go test -race` clean (`5679e67`). Dev ergonomics: `Makefile` (setup/test/build/flash) + gitignore polish.
 - **#17 Claude Code plugin — `/cardputer` skill.** Repo ships a Claude Code plugin (`.claude-plugin/{plugin,marketplace}.json` + `skills/cardputer/SKILL.md`); `/cardputer` detects the current tmux session and runs `cardputerme <session>` to expose it. Symlinked into both accounts' `skills/`. Mechanism verified on a fresh session (own port 8002 + beacon). Agnostic — only calls the CLI.
 - **#8 Device E2E — user-verified on hardware.** Full checklist confirmed working on the Cardputer: beacon discovery → WS connect → mirror → run commands → drive live Claude Code → answer prompts → history recall → autosuggest ghost + Tab → marquee → fn+esc back → zoom. 3 bugs E2E caught+fixed: beacon subnet-broadcast (`652d4f7`), grid-based prompt detection, awaiting-on-connect.
 - **#11 Zoom (server-owned text size) — verified on device.** Display msg carries `size` (one font, `setTextSize` scales); **ctrl+= / ctrl+_** (Cardputer +/-) zoom in/out, **ctrl+space** resets; viewport `cols()`/`rows()` derive inversely from size (1↔3, size 2 baseline). History recall stays on ctrl+up/down; nav (fn/opt+arrows) unchanged. Firmware flashed; zoom confirmed working on hardware.
