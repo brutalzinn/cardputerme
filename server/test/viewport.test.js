@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { panViewport, windowLines, ROW_STEP, COL_STEP } = require('../lib/viewport');
+const { panViewport, windowLines, anchorRow, ROW_STEP, COL_STEP } = require('../lib/viewport');
 
 // The server owns an omnidirectional viewport over the terminal's NATIVE-width
 // grid; the device forwards arrow keys and renders the window the server sends.
@@ -35,6 +35,15 @@ test('windowLines slices rows x cols at the viewport offset, keeping colors', ()
     { text: 'eeee', color: 2 },
     { text: 'hhhh', color: 3 },
   ]);
+});
+
+test('anchorRow places the pointer near the bottom so the question above is visible', () => {
+  assert.equal(anchorRow(10, 8), 10 - (8 - 2));  // pointer on view row 6 of 8
+});
+
+test('anchorRow floors at 0 when the pointer is near the top of the grid', () => {
+  assert.equal(anchorRow(1, 8), 0);
+  assert.equal(anchorRow(0, 8), 0);
 });
 
 test('windowLines stops at the end of the grid (no padding rows)', () => {

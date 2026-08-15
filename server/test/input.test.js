@@ -93,28 +93,17 @@ test('picker ignores junk and out-of-range numbers', () => {
   assert.equal(interpretKey(PICKER(), 'a', ctx()).state.mode, 'picker');
 });
 
-// --- arrows: pan the viewport while reading, but DRIVE the terminal's own
-// selector (AskUserQuestion & co.) when a prompt is up and nothing is typed.
 test('arrows produce a pan action in mirror mode', () => {
   const r = interpretKey(MIRROR('typing kept'), 'up', ctx());
   assert.deepEqual(r.action, { kind: 'pan', key: 'up' });
-  assert.equal(r.state.input, 'typing kept');   // panning does not lose input
+  assert.equal(r.state.input, 'typing kept');
 });
 
-test('up/down go INTO the terminal when awaiting a prompt and not typing', () => {
-  const r = interpretKey(MIRROR(''), 'down', ctx({ awaiting: true }));
-  assert.deepEqual(r.action, { kind: 'pressKey', key: 'down' });
-  assert.deepEqual(interpretKey(MIRROR(''), 'up', ctx({ awaiting: true })).action, { kind: 'pressKey', key: 'up' });
-});
-
-test('left/right still PAN while awaiting (horizontal reading stays possible)', () => {
-  assert.equal(interpretKey(MIRROR(''), 'left', ctx({ awaiting: true })).action.kind, 'pan');
-  assert.equal(interpretKey(MIRROR(''), 'right', ctx({ awaiting: true })).action.kind, 'pan');
-});
-
-test('arrows still pan while typing, even when awaiting', () => {
-  const r = interpretKey(MIRROR('draft'), 'up', ctx({ awaiting: true }));
-  assert.equal(r.action.kind, 'pan');
+test('arrows PAN even while awaiting a prompt (arrows read, numbers choose)', () => {
+  assert.deepEqual(interpretKey(MIRROR(''), 'down', ctx({ awaiting: true })).action, { kind: 'pan', key: 'down' });
+  assert.deepEqual(interpretKey(MIRROR(''), 'up', ctx({ awaiting: true })).action, { kind: 'pan', key: 'up' });
+  assert.deepEqual(interpretKey(MIRROR(''), 'left', ctx({ awaiting: true })).action, { kind: 'pan', key: 'left' });
+  assert.deepEqual(interpretKey(MIRROR('draft'), 'up', ctx({ awaiting: true })).action, { kind: 'pan', key: 'up' });
 });
 
 test('tab presses Tab in the terminal (selector auto-advance)', () => {
@@ -126,12 +115,11 @@ test('arrows are ignored in the picker', () => {
   assert.equal(interpretKey(PICKER(), 'down', ctx()).action.kind, 'none');
 });
 
-// --- opt+arrows ALWAYS pan — the dedicated "read around" keys, so the user can
-// scroll up to read the question/proposal even while a selector is up.
-test('opt+arrows pan even while awaiting a prompt', () => {
+test('opt+arrows send real arrow keys to the terminal (drive its selector)', () => {
   const r = interpretKey(MIRROR(''), 'opt+up', ctx({ awaiting: true }));
-  assert.deepEqual(r.action, { kind: 'pan', key: 'up' });
-  assert.deepEqual(interpretKey(MIRROR(''), 'opt+left', ctx({ awaiting: true })).action, { kind: 'pan', key: 'left' });
+  assert.deepEqual(r.action, { kind: 'pressKey', key: 'up' });
+  assert.deepEqual(interpretKey(MIRROR(''), 'opt+down', ctx()).action, { kind: 'pressKey', key: 'down' });
+  assert.deepEqual(interpretKey(MIRROR(''), 'opt+left', ctx()).action, { kind: 'pressKey', key: 'left' });
 });
 
 // --- shift+esc: STOP the agent — a real Escape into the terminal (Claude

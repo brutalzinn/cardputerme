@@ -28,7 +28,7 @@ const { createRegistry } = require('./lib/sessions');
 const { buildDisplay, COLORS } = require('./lib/display');
 const { interpretKey } = require('./lib/input');
 const { parseLine, stripAnsi } = require('./lib/ansi');
-const { panViewport, windowLines } = require('./lib/viewport');
+const { panViewport, windowLines, anchorRow } = require('./lib/viewport');
 
 // ---- tiny .env loader (no dependency) --------------------------------------
 (function loadEnv() {
@@ -231,13 +231,10 @@ function composeMirror(grid, status, awaiting) {
   for (const l of grid) { if (l.text.length > maxLen) maxLen = l.text.length; }
   const maxRow = Math.max(0, grid.length - VIEW_ROWS);
   const maxCol = Math.max(0, maxLen - VIEW_COLS);
-  // While a menu is up, centre the highlighted option — but ONLY when the
-  // highlight actually moved, so the user can pan away (opt+arrows) to read the
-  // question/proposal without being yanked back on every refresh.
   const selRow = awaiting ? findSelectorRow(grid) : -1;
   const selMoved = selRow >= 0 && selRow !== view.selRow;
   view.selRow = selRow;
-  if (selMoved) { view.row = selRow - ((VIEW_ROWS / 2) | 0); view.follow = false; }
+  if (selMoved) { view.row = anchorRow(selRow, VIEW_ROWS); view.follow = false; }
   if (selRow < 0 && view.follow) view.row = maxRow;
   view.row = clamp(view.row, 0, maxRow);
   view.col = clamp(view.col, 0, maxCol);

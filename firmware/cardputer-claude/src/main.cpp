@@ -144,10 +144,14 @@ void drawHeader() {
     d.print(toast);
   }
 
-  d.setTextColor(COL_TEXT, COL_HDR);
+  int batt = M5Cardputer.Power.getBatteryLevel();
   String pos = String(g_lines.empty() ? 0 : g_page + 1) + "/" + String(pageCount());
-  d.setCursor(SCR_W - (int)pos.length() * 6 - 3, 4);
-  d.print(pos);
+  String tail = String(batt) + "% " + pos;
+  d.setCursor(SCR_W - (int)tail.length() * 6 - 3, 4);
+  d.setTextColor(batt > 20 ? COL_OK : COL_WARN, COL_HDR);
+  d.print(String(batt) + "%");
+  d.setTextColor(COL_TEXT, COL_HDR);
+  d.print(" " + pos);
 }
 
 // Right-edge scroll indicator: which page within the whole screen.
@@ -388,6 +392,12 @@ void loop() {
   bool toastShowing = (millis() < toastUntil) && toast.length();
   if (toastWasShown && !toastShowing) drawHeader();
   toastWasShown = toastShowing;
+
+  static unsigned long battTick = 0;
+  if (millis() - battTick > 15000) {
+    battTick = millis();
+    drawHeader();
+  }
 
   tickStatusMarquee();                     // slide long status text (token usage etc.)
 

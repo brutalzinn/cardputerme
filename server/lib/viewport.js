@@ -18,6 +18,10 @@ function panViewport(view, key) {
   return view;
 }
 
+function anchorRow(selRow, viewRows) {
+  return Math.max(0, selRow - (viewRows - 2));
+}
+
 // Slice a rows x cols window out of the grid at the viewport offset, keeping each
 // line's colour. No padding rows past the end of the grid.
 function windowLines(grid, view, dims) {
@@ -29,4 +33,4 @@ function windowLines(grid, view, dims) {
   return out;
 }
 
-module.exports = { panViewport, windowLines, ROW_STEP, COL_STEP };
+module.exports = { panViewport, windowLines, anchorRow, ROW_STEP, COL_STEP };

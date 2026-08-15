@@ -24,9 +24,8 @@
 //     shift+esc   -> pressKey escape (STOP the agent; draft kept)
 //     ctrl+up/dn  -> history recall prev / next (shell idiom)
 //     ctrl+<char> -> pressKey ctrl+<char> (Ctrl+C & co.)
-//     arrows      -> awaiting & not typing: up/down pressKey (drive the
-//                    selector), left/right pan; otherwise pan
-//     opt+<arrow> -> ALWAYS pan (read around, even while a selector is up)
+//     arrows      -> pan (read around; numbers choose menu options)
+//     opt+<arrow> -> pressKey arrow (drive the terminal's own selector)
 //   picker:
 //     number      -> select that session, back to mirror
 //     esc         -> cancel back to mirror
@@ -101,7 +100,7 @@ function interpretKey(state, key, ctx) {
     return quiet(state);
   }
   if (mod === 'opt') {
-    if (ARROWS.has(base)) return { state, action: { kind: 'pan', key: base } };  // always read around
+    if (ARROWS.has(base)) return press(state, base);
     return quiet(state);
   }
 
@@ -115,13 +114,7 @@ function interpretKey(state, key, ctx) {
   }
   if (k === 'backspace') return quiet(mirror(input.slice(0, -1), hist));
   if (k === 'tab') return press(state, 'tab');
-  if (ARROWS.has(k)) {
-    // A prompt selector is on screen and the user isn't typing: up/down DRIVE it;
-    // left/right keep panning so wide options stay readable.
-    const vertical = k === 'up' || k === 'down';
-    if (awaiting && vertical && input.length === 0) return press(state, k);
-    return { state, action: { kind: 'pan', key: k } };
-  }
+  if (ARROWS.has(k)) return { state, action: { kind: 'pan', key: k } };
   if (k.length === 1) {
     if (awaiting && input.length === 0 && isDigits(k)) return press(state, k);   // answer a menu
     return quiet(mirror(input + k, hist));

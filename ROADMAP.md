@@ -1,8 +1,8 @@
 # cardputerme — Roadmap
-> Updated 2026-08-14 (night). Focus: **prove the integration really works** (user-run E2E), then land the reviewed cleanup. Terse; `git log` holds detail.
+> Updated 2026-08-15. Focus: **prove the integration really works** (user-run untethered E2E, live fix loop), then land the reviewed cleanup. Terse; `git log` holds detail.
 
 ## What is cardputerme
-**Expose ANY terminal window/session to an M5Cardputer.** One command (`cardputerme [name]` — zsh alias → `bin/cardputer-server`) exposes this machine; the device auto-lists sessions and drives whichever you pick over ONE WebSocket. Fully agnostic: the user NEVER knows how a session is hosted (tmux is an invisible, swappable backend inside `lib/terminal.js` only); the whole system is exactly **our server + our firmware**. Thin device: draws the server-described display (text+color per line + status bar w/ marquee), forwards raw keys; the **server owns everything** (input buffer, esc flows, pickers, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, KISS, TDD; device E2E is the user's.
+**Expose ANY terminal window/session to an M5Cardputer.** One command (`cardputerme [name]` — zsh alias → `bin/cardputer-server`) exposes this machine; the device auto-lists sessions and drives whichever you pick over ONE WebSocket. Fully agnostic: the user NEVER knows how a session is hosted (tmux is an invisible, swappable backend inside `lib/terminal.js` only); the whole system is exactly **our server + our firmware**. Thin device: draws the server-described display (text+color per line + status bar w/ marquee), forwards raw keys; the **server owns everything** (input buffer, esc flows, pickers, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments (the code is the documentation), KISS, TDD; device E2E is the user's. North star: **SSH-parity** — the only difference vs ssh is the small screen; mirror the terminal's own colors + layout.
 
 ## 🎯 Now
 Current: **#8 E2E verification** — run the 10-item device checklist; fix failures one at a time.
@@ -10,12 +10,16 @@ Current: **#8 E2E verification** — run the 10-item device checklist; fix failu
 
 ## Plan — 3 days (deploy at end of each day)
 
-**📅 Day 1 — 2026-08-14 · Prove it works**
+**📅 Day 1 — 2026-08-14/15 · Prove it works**
 8. 🟡 **E2E verification (user-run).** *(current)* 10-item checklist: type/send · esc-clear · session picker · marquee · Ctrl+C · history (ctrl+fn-↑/↓) · shift+esc interrupt · choice panel (fn+↑/↓ + Enter, `>` pointer) · read-while-choosing (opt+arrows) · pan. Fix each failure immediately (server-side preferred; flash only if unavoidable).
+   - ✅ R1 (2026-08-15): question text unreadable while choosing (view orbited the wrapping pointer) → viewport now ANCHORS the pointer near the view bottom so the question above fills the screen (`anchorRow`, lib/viewport.js; 88/88). Server restart picks it up.
+   - ✅ R2 (2026-08-15): battery % in the top header (green >20%, orange ≤20%, refresh 15s) — flashed.
+   - ✅ R3 (2026-08-15, user-decided): **arrows read, numbers choose** — bare arrows ALWAYS pan (read anything, even during questions); digits answer menu options; opt+arrows now send real arrow keys (drive the terminal's own selector); Enter confirms. lib/input.js FSM swap; 86/86.
+   - ⏭ Next: user checkpoint-commits, then the comment-strip sweep (see #9f), then retest questions on-device.
 > 🚀 **Deploy (end of Day 1)** — all 10 pass on the physical device.
 
 **📅 Day 2 — 2026-08-15 · Reviewed cleanup (4-agent /simplify findings, approved)**
-9. ⬜ **Bypass/status bottom-chrome fix + cleanup queue.** (a) Status bar = the pane's bottom chrome block (bypass + status rows) joined for the marquee, dropped from the body. (b) Dead code purge (card pipeline, `detectChoice`, unread prompt-text assembly → `hasChoicePrompt`, unreachable color branches, unused `cwd`/`remove`/`run`, inert picker actions). (c) Reuse homes (`keepTail`/`isDigit`/tab-in-`toAscii`/native `trimEnd`). (d) Efficiency: pane-identity early-out, drop `exists()` from tick, parse rows once + cap first, ASCII fast-paths, one echo frame for legacy `cmd`, TTL on `refreshSessions`. (e) Altitude: extract tested `lib/screen.js` (pure `composeMirror`), unify `selectSession`/`submitText` across FSM/HTTP/WS, one state object, backend-neutral adapter exports (`createBackend`). All TDD; suite green each step.
+9. ⬜ **Bypass/status bottom-chrome fix + cleanup queue.** (a) Status bar = the pane's bottom chrome block (bypass + status rows) joined for the marquee, dropped from the body. (b) Dead code purge (card pipeline, `detectChoice`, unread prompt-text assembly → `hasChoicePrompt`, unreachable color branches, unused `cwd`/`remove`/`run`, inert picker actions). (c) Reuse homes (`keepTail`/`isDigit`/tab-in-`toAscii`/native `trimEnd`). (d) Efficiency: pane-identity early-out, drop `exists()` from tick, parse rows once + cap first, ASCII fast-paths, one echo frame for legacy `cmd`, TTL on `refreshSessions`. (e) Altitude: extract tested `lib/screen.js` (pure `composeMirror`), unify `selectSession`/`submitText` across FSM/HTTP/WS, one state object, backend-neutral adapter exports (`createBackend`). (f) **Comment strip (user rule: the code is the documentation)** — remove ALL code comments across server/ + firmware via the no-regex char-scan stripper (scratchpad script ready); AFTER a user checkpoint commit; verify: full suite green + firmware compiles + `git diff` eyeball. All TDD; suite green each step.
 > 🚀 **Deploy (end of Day 2)** — restart server; payload ≪15KB; idle CPU visibly down; behavior unchanged on device.
 
 **📅 Day 3 — 2026-08-16 · Any instance, comfortably**
@@ -41,5 +45,5 @@ PTY backend (drop-in via adapter; enables "expose ANY window" fully — run `car
 ## Reference
 - **Run:** `cardputerme [name]` (alias in ~/.zshrc) or `./bin/cardputer-server`; ONE port `:4711`, ONE WS. Device: `ws://192.168.0.149:4711/ws` (baked in firmware/.env).
 - **Tests:** `cd server && npm test` (86 pass). **Flash:** `cd firmware/cardputer-claude && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's).
-- **Keys:** chars type · Enter send · Shift+Enter newline · esc clear→picker · shift+esc interrupt · Tab · fn+arrows smart · opt+arrows pan · ctrl+letter control-key · ctrl+fn-↑/↓ history.
+- **Keys:** chars type · Enter send/confirm · Shift+Enter newline · esc clear→picker · shift+esc interrupt · Tab · **arrows read (pan) · numbers choose** · opt+arrows real arrow keys (drive TUI selector) · ctrl+letter control-key · ctrl+fn-↑/↓ history.
 - **Method:** WIP=1; one 🟡 = one started tasks.roblab.app task. Quiet work (no agent fan-out spam — user watches via the device).
