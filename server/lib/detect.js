@@ -1,18 +1,7 @@
 'use strict';
 
-function trimEnd(s) {
-  let e = s.length;
-  while (e > 0) {
-    const c = s[e - 1];
-    const isSpace = c === ' ' || c === '\n' || c === '\t' || c === '\r';
-    if (!isSpace) break;
-    e--;
-  }
-  return s.slice(0, e);
-}
-
 function endsWithQuestion(text) {
-  const t = trimEnd(String(text == null ? '' : text));
+  const t = String(text == null ? '' : text).trimEnd();
   return t.length > 0 && t[t.length - 1] === '?';
 }
 
@@ -40,5 +29,5 @@ function parseChoices(text) {
   return out;
 }
 
-module.exports = { endsWithQuestion, parseChoices, trimEnd };
+module.exports = { endsWithQuestion, parseChoices };
 

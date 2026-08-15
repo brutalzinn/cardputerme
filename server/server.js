@@ -6,7 +6,7 @@ const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { sliceIntoCards, toAscii, wrapLine } = require('./lib/format');
-const { parseChoices, endsWithQuestion, trimEnd } = require('./lib/detect');
+const { parseChoices, endsWithQuestion } = require('./lib/detect');
 const { createBackend } = require('./lib/terminal');
 const { pickPort, freePortProbe } = require('./lib/discovery');
 const { beaconMessage, BEACON_PORT, BEACON_ADDR, BEACON_INTERVAL_MS } = require('./lib/beacon');
@@ -71,7 +71,7 @@ const NO_SESSION = 'Terminal is gone.\nRun cardputerme on\nthe computer to\nexpo
 function detectPrompt(pane) {
   if (!pane) return null;
 
-  const lines = toAscii(pane).split('\n').map((l) => trimEnd(l));
+  const lines = toAscii(pane).split('\n').map((l) => l.trimEnd());
   const optIdx = [];
   for (let i = 0; i < lines.length; i++) if (parseChoices(lines[i]).length > 0) optIdx.push(i);
   if (optIdx.length < 2) return null;
@@ -101,7 +101,7 @@ function gridLines(rows) {
   const out = [];
   for (const raw of rows) {
     const { text, color } = parseLine(raw, COLORS.text);
-    out.push({ text: toAscii(text).split('\t').join('  '), color });
+    out.push({ text: toAscii(text), color });
   }
   if (out.length > MAX_LINES) return out.slice(out.length - MAX_LINES);
   return out;

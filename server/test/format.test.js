@@ -16,6 +16,10 @@ test('toAscii keeps newlines', () => {
   assert.equal(toAscii('a\nb'), 'a\nb');
 });
 
+test('toAscii expands tabs to two spaces (single home for tab handling)', () => {
+  assert.equal(toAscii('a\tb'), 'a  b');
+});
+
 test('wrapLine breaks at word boundaries within cols', () => {
   assert.deepEqual(wrapLine('the quick brown fox', 10), ['the quick', 'brown fox']);
 });

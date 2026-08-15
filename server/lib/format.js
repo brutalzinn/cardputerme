@@ -4,6 +4,7 @@ const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
 function toAscii(s) {
   return String(s)
+    .split('\t').join('  ')
     .replace(/[‘’‛]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—−]/g, '-')
@@ -44,7 +45,7 @@ function sliceIntoCards(text, cols, linesPerCard, maxCards = 40) {
 
   const wrapped = [];
   for (const line of rawLines) {
-    for (const w of wrapLine(line.replace(/\t/g, '  '), cols)) {
+    for (const w of wrapLine(line, cols)) {
       wrapped.push(w.replace(/\s+$/, ''));
     }
   }
