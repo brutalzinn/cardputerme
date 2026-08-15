@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"cardputerme/internal/server"
 )
@@ -36,6 +37,8 @@ func main() {
 		ScrollbackLines: envInt("SCROLLBACK_LINES", 200),
 		MaxCards:        envInt("MAX_CARDS", 40),
 		Notify:          os.Getenv("NOTIFY") != "0",
+		DimAfter:        time.Duration(envInt("DIM_AFTER_S", 30)) * time.Second,
+		OffAfter:        time.Duration(envInt("OFF_AFTER_S", 120)) * time.Second,
 	}
 	if err := server.New(cfg).Run(); err != nil {
 		log.Fatal(err)

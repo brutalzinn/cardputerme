@@ -16,6 +16,7 @@ import (
 
 	"cardputerme/internal/discovery"
 	"cardputerme/internal/input"
+	"cardputerme/internal/power"
 	"cardputerme/internal/screen"
 	"cardputerme/internal/terminal"
 
@@ -41,6 +42,8 @@ type Config struct {
 	ScrollbackLines int
 	MaxCards        int
 	Notify          bool
+	DimAfter        time.Duration
+	OffAfter        time.Duration
 }
 
 type mirrorCache struct {
@@ -77,6 +80,10 @@ type Server struct {
 
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
+
+	power      *power.Tracker
+	powerMu    sync.Mutex
+	powerTimer *time.Timer
 }
 
 const (
@@ -94,6 +101,7 @@ func New(cfg Config) *Server {
 		view:     screen.View{Follow: true, SelRow: -1},
 		hist:     -1,
 		size:     baseSize,
+		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 	}
 }
 
@@ -283,6 +291,7 @@ func (s *Server) pushIfChanged(force bool) {
 		s.lastSig = sg
 	}
 	freshQuestion := st.awaiting && !s.lastAwaiting
+	awaitingChanged := st.awaiting != s.lastAwaiting
 	if !st.awaiting && s.lastAwaiting {
 		s.view.Follow = true
 	}
@@ -290,6 +299,9 @@ func (s *Server) pushIfChanged(force bool) {
 	msg := displayMessage(st)
 	s.mu.Unlock()
 
+	if awaitingChanged {
+		s.applyPower(s.power.SetInhibit(time.Now(), st.awaiting))
+	}
 	if changed {
 		s.hub.broadcast(msg)
 	}
@@ -298,7 +310,35 @@ func (s *Server) pushIfChanged(force bool) {
 	}
 }
 
+func powerMessage(st power.State) string {
+	return `{"type":"power","state":"` + string(st) + `"}`
+}
+
+func (s *Server) applyPower(st power.State, changed bool) {
+	if changed {
+		s.hub.broadcast(powerMessage(st))
+	}
+	s.armPowerTimer()
+}
+
+func (s *Server) armPowerTimer() {
+	d := s.power.Until(time.Now())
+	s.powerMu.Lock()
+	defer s.powerMu.Unlock()
+	if s.powerTimer != nil {
+		s.powerTimer.Stop()
+		s.powerTimer = nil
+	}
+	if d <= 0 {
+		return
+	}
+	s.powerTimer = time.AfterFunc(d, func() {
+		s.applyPower(s.power.At(time.Now()))
+	})
+}
+
 func (s *Server) applyKey(key string) {
+	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
 	s.input = res.State.Input
@@ -358,6 +398,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// synced — otherwise a digit answering a prompt that was already on screen at
 	// connect time would wrongly land in the input buffer.
 	s.pushIfChanged(true)
+	s.hub.broadcast(powerMessage(s.power.State()))
 
 	for {
 		_, data, err := c.ReadMessage()
@@ -373,6 +414,10 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch m.Type {
+		case "wake":
+			s.applyPower(s.power.Wake(time.Now()))
+		case "sleep":
+			s.applyPower(s.power.Sleep(time.Now()))
 		case "key":
 			s.applyKey(m.Key)
 		case "cmd":
@@ -481,7 +526,9 @@ func (s *Server) Run() error {
 	mux.HandleFunc("/ws", s.wsHandler)
 
 	log.Printf("cardputerme — exposing '%s' on http://0.0.0.0:%d  (ws://…/ws)", s.cfg.Name, port)
+	log.Printf("  screen : dim after %v, off after %v (0 = never)", s.cfg.DimAfter, s.cfg.OffAfter)
 	s.startBeacon(port)
+	s.armPowerTimer()
 
 	stop := s.backend.Subscribe(s.schedulePush, func() {
 		log.Printf("[expose] terminal '%s' is gone — shutting down", s.cfg.Name)

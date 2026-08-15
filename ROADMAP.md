@@ -1,18 +1,23 @@
 # cardputerme — Roadmap
-> Updated 2026-08-15. **All 19 planned tasks shipped** — the whole system is E2E-verified on hardware, the Go server is audited + race-clean, and releases cut via a manual tag-driven GitHub Action publishing macOS + Ubuntu binaries. Terse; `git log` holds detail. New work starts from ## Parked.
+> Updated 2026-08-15. #1–#19 shipped (`v0.0.1`); a new cycle is open on **#20 idle sleep**. Terse; `git log` holds detail.
 
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) builds+execs a **Go binary** that runs a background WS server for that ONE terminal on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device listens, lists every live exposure (**IPv4:port + name**), and connects to the one you pick. NO sessions concept, NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. Thin device: draws the server-described display, forwards raw keys; server owns everything (input, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
 
-## Focus — ✅ ALL SHIPPED
-Every planned task (#1–#19) is delivered. The whole job is done: expose any terminal with `cardputerme`, discover it on the Cardputer over a UDP beacon, connect over WebSocket, and drive it with full SSH-parity — mirror, keys, prompts, history, autosuggest, marquee, zoom, faithful colors. Go server is unit-tested (72), 4-agent-audited, and race-clean. Install needs no Go: prebuilt macOS + Ubuntu binaries cross-compile via `make release` and ship through a manual tag-driven GitHub Action. `v0.0.1` tagged. Next north star lives in ## Parked — pull one in to open a new cycle.
+## Focus — the device survives a day in your pocket
+#1–#19 delivered full SSH-parity: expose any terminal with `cardputerme`, discover it over the UDP beacon, drive it from the Cardputer (mirror, keys, prompts, history, autosuggest, marquee, zoom, faithful colors). Go server unit-tested, 4-agent-audited, race-clean; no-Go install via prebuilt binaries; `v0.0.1` tagged. What's left is **living with it**: a screen that burns battery while you're not looking is the one thing between this and an always-on pocket terminal. **#20 makes the server own when the screen sleeps** — the device never decides, exactly like a compositor owning idle. Done = the mirror dims itself, sleeps itself, wakes on a touch, and never sleeps on an unanswered prompt.
 
 ## 🎯 Now
-Nothing queued — the plan is empty (all 19 ✅, project shipped). New work starts by promoting an item from ## Parked to a fresh 🟡.
+Current: **#20 Server-owned idle sleep** — Go side landed + green; awaiting the user's device E2E (flash → watch it dim/sleep/wake).
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
-_Empty — all planned tasks shipped. Populate from ## Parked when the next cycle begins._
+**📅 Day 1 — 2026-08-15 · idle policy**
+1. 🟡 **#20 Server-owned idle sleep (power ladder).** *(current)* `internal/power` = pure `Policy`/`Tracker`, ladder `on→dim→off` (14 tests, `power_test.go`). Wired in `server.go`: `applyPower`/`armPowerTimer` arm ONE `time.AfterFunc` off `Tracker.Until` (event-driven, no tick); broadcast `{"type":"power","state":…}` on transition only; `applyKey` + device `wake`/`sleep` msgs call `Wake`/`Sleep`; `lastAwaiting` drives `SetInhibit` so a pending prompt never sleeps; state re-sent on ws connect. `DIM_AFTER_S=30` / `OFF_AFTER_S=120` via `cmd/cardputerme/main.go` (0 = never). Firmware `main.cpp`: `power` msg → `setBrightness` 255/40/0; a key pressed while not-on is **swallowed** and sends `wake`; **G0 toggles sleep/wake** (pocket it). Builds clean (flash 32.4%). **Remaining: user flashes + E2E.**
+> 🚀 **Deploy (end of Day 1)** — `make flash`; watch dim@30s, off@2min, key wakes, G0 pockets, prompt keeps it lit.
+
+**📅 Day 2 — unscheduled** · pull from ## Parked once #20 is E2E-signed-off.
+**📅 Day 3 — unscheduled**
 
 ## Done 2026-08-15 (Go era)
 - **#19 Release via manual tag-driven GitHub Action.** `.github/workflows/release.yml` — `workflow_dispatch` with a required `tag` input; checks out that tag (fails if unpushed → enforces tag-first), sets up Go from `server-go/go.mod`, runs `make release-publish VERSION=<tag>` with `contents:write` + `GH_TOKEN`. Process: push a tag, then Actions → Release → Run workflow. Reuses the #18 Makefile targets; README documents it. YAML validated.
@@ -41,5 +46,6 @@ PTY backend (drop-in via the adapter → "expose ANY window", no tmux; user chos
 ## Reference
 - **Run:** `cardputerme [name]` (alias in ~/.zshrc) — background Go server per exposure, free port 8001–8255, pidfile+log `~/.cardputerme/<name>.{pid,log}`; terminal named after the cwd (or `<name>`), created IN it; re-run = "already exposed"; self-exits when its terminal dies. Beacon: UDP 8000 every 2s (subnet-directed + limited broadcast).
 - **Tests:** `cd server-go && go test ./...` (71, 4 packages) · `go vet ./...` · `go run golang.org/x/tools/cmd/deadcode@latest -test ./...`. **Flash:** `cd firmware/cardputer && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's; only Wi-Fi creds in `firmware/.env`).
+- **Screen sleep:** server owns it (`ext-idle-notify-v1` shape) — dim 30s, off 2min (`DIM_AFTER_S`/`OFF_AFTER_S`, 0=never); any key wakes (first press swallowed), **G0 = sleep now / wake**; an unanswered prompt never sleeps. Sleep = backlight off, WS stays up (deep sleep would drop the socket).
 - **Keys:** chars type · Enter send/confirm · Shift+Enter newline · esc clear / real Escape · shift+esc interrupt · Tab accept-autosuggest-else-passthrough · **fn+arrows read (pan) · digits choose** · opt+arrows real arrows (drive TUI selector) · ctrl+letter control-key · **ctrl+up/down history recall** · **ctrl+= / ctrl+_ zoom in/out · ctrl+space reset zoom** · (device) digits pick a server, fn+esc back to the list.
 - **Method:** WIP=1; one 🟡 = one started tasks.roblab.app task. Quiet work — user watches via the device.

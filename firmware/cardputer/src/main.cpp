@@ -61,6 +61,13 @@ uint16_t g_targetPort = 0;
 String g_targetName = "";
 bool g_listDirty = false;
 
+enum PowerState { POWER_ON, POWER_DIM, POWER_OFF };
+PowerState g_power = POWER_ON;
+
+#define BRIGHT_ON   255
+#define BRIGHT_DIM  40
+#define BRIGHT_OFF  0
+
 String toast = "";
 unsigned long toastUntil = 0;
 
@@ -340,6 +347,47 @@ void applyDisplay(JsonDocument& doc) {
   redraw();
 }
 
+void sendEvent(const char* type) {
+  if (!wsConnected) return;
+  JsonDocument doc;
+  doc["type"] = type;
+  String body;
+  serializeJson(doc, body);
+  webSocket.sendTXT(body);
+}
+
+uint8_t brightnessFor(PowerState p) {
+  if (p == POWER_OFF) return BRIGHT_OFF;
+  if (p == POWER_DIM) return BRIGHT_DIM;
+  return BRIGHT_ON;
+}
+
+void applyPower(PowerState p) {
+  g_power = p;
+  M5Cardputer.Display.setBrightness(brightnessFor(p));
+}
+
+void requestWake() {
+  applyPower(POWER_ON);
+  sendEvent("wake");
+}
+
+void requestSleep() {
+  applyPower(POWER_OFF);
+  sendEvent("sleep");
+}
+
+PowerState powerFromName(const char* name) {
+  if (strcmp(name, "off") == 0) return POWER_OFF;
+  if (strcmp(name, "dim") == 0) return POWER_DIM;
+  return POWER_ON;
+}
+
+void togglePower() {
+  if (g_power != POWER_ON) { requestWake(); return; }
+  requestSleep();
+}
+
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
@@ -358,6 +406,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       if (deserializeJson(doc, payload, length)) return;
       const char* t = doc["type"] | "";
       if (strcmp(t, "display") == 0) { applyDisplay(doc); return; }
+      if (strcmp(t, "power") == 0) { applyPower(powerFromName(doc["state"] | "on")); return; }
       if (strcmp(t, "notify") == 0) {
         bool q = (strcmp(doc["reason"] | "", "question") == 0);
         beep(q);
@@ -420,12 +469,18 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
   if (st.enter && !st.shift) sendKey("enter");
 }
 
+void handleKeyPress(const Keyboard_Class::KeysState& st) {
+  if (g_power != POWER_ON) { requestWake(); return; }
+  handleKeys(st);
+}
+
 void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
   M5Cardputer.Speaker.setVolume(140);
+  applyPower(POWER_ON);
   M5Cardputer.Display.fillScreen(COL_BG);
 
   connectWifi();
@@ -449,9 +504,11 @@ void loop() {
   if (g_haveTarget && g_listDirty) g_listDirty = false;
   if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
 
+  if (M5Cardputer.BtnA.wasPressed()) togglePower();
+
   if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
-    handleKeys(st);
+    handleKeyPress(st);
   }
 
   static bool toastWasShown = false;
