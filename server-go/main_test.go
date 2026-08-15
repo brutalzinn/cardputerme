@@ -56,6 +56,21 @@ func TestSplitScreen(t *testing.T) {
 	}
 }
 
+func TestSplitScreenPrefersInterruptRow(t *testing.T) {
+	pane := "building the thing\n✳ Baking… (esc to interrupt)\n$ "
+	_, status := splitScreen(pane)
+	if status != "Baking... (esc to interrupt)" {
+		t.Fatalf("status %q", status)
+	}
+}
+
+func TestSplitScreenFallsBackToLastRow(t *testing.T) {
+	_, status := splitScreen("line one\nline two\n")
+	if status != "line two" {
+		t.Fatalf("status %q", status)
+	}
+}
+
 func TestComposeMirrorFollowsBottom(t *testing.T) {
 	s := &Session{view: View{Follow: true, SelRow: -1}, hist: -1}
 	grid := []Line{}

@@ -121,6 +121,12 @@ func splitScreen(pane string) ([]Line, string) {
 		return []Line{}, ""
 	}
 	status := strings.TrimSpace(toAscii(stripAnsi(rows[last])))
+	for i := len(rows) - 1; i >= 0; i-- {
+		if strings.Contains(strings.ToLower(stripAnsi(rows[i])), "esc to interrupt") {
+			status = strings.TrimSpace(toAscii(stripAnsi(rows[i])))
+			break
+		}
+	}
 	return gridLines(rows[:last]), status
 }
 
