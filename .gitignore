@@ -1,2 +1,4 @@
 llm/
 server-go/cardputerme
+.pio/
+.env
