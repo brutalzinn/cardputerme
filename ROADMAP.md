@@ -34,8 +34,8 @@ Current: **#14 terminal-fidelity pass** — audit colors + layout vs a real term
 ## Done 2026-08-14 (server-driven everything — JS era, superseded by Go)
 - **#1–#7:** agnostic prompt detection · terminal adapter · named sessions · display protocol + ANSI→RGB565 colors · server-side input FSM (esc/ctrl/history/selector/pan) · server-rendered numbered picker · thin firmware + marquee. See `git log`.
 
-## ⚠️ Security follow-up (needs the user)
-Wi-Fi creds (SSID + password) were committed to `firmware/.env` and pushed; untracked + gitignored 2026-08-15 but **still in git history**. Remediate: (1) **rotate the Wi-Fi password**; (2) optionally scrub history (`git filter-repo`/BFG + force-push — destructive, rewrites hashes, invalidates clones — confirm before I run it). `firmware/cardputer/.pio/` (~344 MB) also purged from tracking, still in history.
+## Security note (acknowledged — no action needed)
+Wi-Fi creds were once committed to `firmware/.env` (untracked + gitignored 2026-08-15; still in git history). **User decided NOT to rotate (2026-08-15) — accepted.** History scrub (`git filter-repo`/BFG + force-push) remains available if ever wanted; `firmware/cardputer/.pio/` (~344 MB) is also in history. No open action.
 
 ## Parked (post-E2E — not now)
 PTY backend (drop-in via the adapter → "expose ANY window", no tmux; user chose to keep tmux for now); cursor-anchored prompt detection; command snippets; session peek in picker.
