@@ -5,31 +5,25 @@
 // the terminal. Keys and actions use GENERIC names only — no backend (tmux)
 // spelling here; the terminal adapter translates. No regex, no else.
 //
-// State: { mode: 'mirror' | 'picker', input: string, hist: number|null }
+// State: { mode: 'mirror', input: string, hist: number|null }
 // Keys:  single chars, arrows (up/down/left/right), enter, backspace, tab, esc,
 //        and modifier chords as '<mod>+<base>' (shift+enter, shift+esc,
 //        ctrl+<char>, ctrl+up/down, opt+<arrow>).
 //
-// Actions: none | send{text} | pressKey{key} | pan{key} | select{name}
-//        | openPicker | closePicker
+// Actions: none | send{text} | pressKey{key} | pan{key}
 //
-//   mirror:
-//     char        -> append to the input buffer (digit answers a menu when
-//                    awaiting and the buffer is empty -> pressKey digit)
-//     backspace   -> delete last char
-//     shift+enter -> append '\n' (compose multi-line)
-//     enter       -> send the buffer (empty buffer -> pressKey enter)
-//     tab         -> pressKey tab (selector auto-advance / completion)
-//     esc         -> typing? CLEAR the input : open the session picker
-//     shift+esc   -> pressKey escape (STOP the agent; draft kept)
-//     ctrl+up/dn  -> history recall prev / next (shell idiom)
-//     ctrl+<char> -> pressKey ctrl+<char> (Ctrl+C & co.)
-//     arrows      -> pan (read around; numbers choose menu options)
-//     opt+<arrow> -> pressKey arrow (drive the terminal's own selector)
-//   picker:
-//     number      -> select that session, back to mirror
-//     esc         -> cancel back to mirror
-//     anything else ignored
+//   char        -> append to the input buffer (digit answers a menu when
+//                  awaiting and the buffer is empty -> pressKey digit)
+//   backspace   -> delete last char
+//   shift+enter -> append '\n' (compose multi-line)
+//   enter       -> send the buffer (empty buffer -> pressKey enter)
+//   tab         -> pressKey tab (selector auto-advance / completion)
+//   esc         -> typing? CLEAR the input : real Escape into the terminal
+//   shift+esc   -> pressKey escape (STOP the agent; draft kept)
+//   ctrl+up/dn  -> history recall prev / next (shell idiom)
+//   ctrl+<char> -> pressKey ctrl+<char> (Ctrl+C & co.)
+//   arrows      -> pan (read around; numbers choose menu options)
+//   opt+<arrow> -> pressKey arrow (drive the terminal's own selector)
 
 function isDigits(text) {
   if (!text) return false;
@@ -37,14 +31,6 @@ function isDigits(text) {
     if (c < '0' || c > '9') return false;
   }
   return true;
-}
-
-// 1-based menu index within [1, n], or 0 if not a valid pick.
-function pickIndex(text, n) {
-  if (!isDigits(text)) return 0;
-  const k = parseInt(text, 10);
-  if (k >= 1 && k <= n) return k;
-  return 0;
 }
 
 const ARROWS = new Set(['up', 'down', 'left', 'right']);
@@ -60,23 +46,14 @@ const press = (state, key) => ({ state, action: { kind: 'pressKey', key } });
 const quiet = (state) => ({ state, action: { kind: 'none' } });
 
 function interpretKey(state, key, ctx) {
-  const mode = (state && state.mode) || 'mirror';
   const input = (state && state.input) || '';
   const hist = state && typeof state.hist === 'number' ? state.hist : null;
   const k = String(key == null ? '' : key);
-  const sessions = (ctx && ctx.sessions) || [];
   const awaiting = !!(ctx && ctx.awaiting);
   const history = (ctx && ctx.history) || [];
   const mirror = (newInput, newHist = null) => ({ mode: 'mirror', input: newInput, hist: newHist });
 
-  if (mode === 'picker') {
-    if (k === 'esc') return { state: mirror(input), action: { kind: 'closePicker' } };
-    const n = pickIndex(k, sessions.length);
-    if (n > 0) return { state: mirror(input), action: { kind: 'select', name: sessions[n - 1] } };
-    return quiet(state);
-  }
-
-  // mirror — parse any modifier chord exactly once.
+  // Parse any modifier chord exactly once.
   const { mod, base } = splitMod(k);
 
   if (mod === 'shift') {
@@ -106,7 +83,7 @@ function interpretKey(state, key, ctx) {
 
   if (k === 'esc') {
     if (input.length > 0) return quiet(mirror(''));                       // clear (also drops recall)
-    return { state: { mode: 'picker', input, hist: null }, action: { kind: 'openPicker' } };
+    return press(state, 'escape');                                        // real Escape (ssh-parity)
   }
   if (k === 'enter') {
     if (input.length > 0) return { state: mirror(''), action: { kind: 'send', text: input } };
@@ -122,4 +99,4 @@ function interpretKey(state, key, ctx) {
   return quiet(state);
 }
 
-module.exports = { interpretKey, isDigits, pickIndex };
+module.exports = { interpretKey, isDigits };

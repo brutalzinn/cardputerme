@@ -1,23 +1,18 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { interpretKey, isDigits, pickIndex } = require('../lib/input');
+const { interpretKey, isDigits } = require('../lib/input');
 
 // The LAZY-DEVICE contract: the device forwards every raw key; the SERVER owns
-// the input buffer, all special functions (esc clears / opens the picker), and
-// what to send to the terminal. State: { mode:'mirror'|'picker', input:string }.
+// the input buffer, all special functions, and what to send to the terminal.
+// One terminal per server — there is no session picker.
 
 const MIRROR = (input) => ({ mode: 'mirror', input: input || '' });
-const PICKER = () => ({ mode: 'picker', input: '' });
-const SESS = ['claude', 'generic', 'rchat'];
-const ctx = (over) => Object.assign({ sessions: SESS, awaiting: false }, over);
+const ctx = (over) => Object.assign({ awaiting: false }, over);
 
 test('helpers scan chars (no regex)', () => {
   assert.equal(isDigits('42'), true);
   assert.equal(isDigits('4a'), false);
-  assert.equal(pickIndex('2', 3), 2);
-  assert.equal(pickIndex('9', 3), 0);
-  assert.equal(pickIndex('x', 3), 0);
 });
 
 // --- typing into the server-owned buffer
@@ -57,19 +52,13 @@ test('esc while typing CLEARS the input (cancel current sending)', () => {
   assert.equal(r.action.kind, 'none');
 });
 
-test('esc with nothing typed opens the picker', () => {
+test('esc with nothing typed reaches the terminal as a real Escape (ssh-parity)', () => {
   const r = interpretKey(MIRROR(''), 'esc', ctx());
-  assert.equal(r.state.mode, 'picker');
-  assert.equal(r.action.kind, 'openPicker');
-});
-
-test('esc in the picker cancels back to mirror', () => {
-  const r = interpretKey(PICKER(), 'esc', ctx());
   assert.equal(r.state.mode, 'mirror');
-  assert.equal(r.action.kind, 'closePicker');
+  assert.deepEqual(r.action, { kind: 'pressKey', key: 'escape' });
 });
 
-// --- prompts and the picker use digits
+// --- prompts use digits
 test('digit answers an on-screen menu when awaiting and not typing', () => {
   const r = interpretKey(MIRROR(''), '2', ctx({ awaiting: true }));
   assert.deepEqual(r.action, { kind: 'pressKey', key: '2' });
@@ -80,17 +69,6 @@ test('digit while typing just appends (no menu answer)', () => {
   const r = interpretKey(MIRROR('port '), '2', ctx({ awaiting: true }));
   assert.equal(r.state.input, 'port 2');
   assert.equal(r.action.kind, 'none');
-});
-
-test('picker + number selects that session, back to mirror', () => {
-  const r = interpretKey(PICKER(), '2', ctx());
-  assert.deepEqual(r.action, { kind: 'select', name: 'generic' });
-  assert.equal(r.state.mode, 'mirror');
-});
-
-test('picker ignores junk and out-of-range numbers', () => {
-  assert.equal(interpretKey(PICKER(), '9', ctx()).action.kind, 'none');
-  assert.equal(interpretKey(PICKER(), 'a', ctx()).state.mode, 'picker');
 });
 
 test('arrows produce a pan action in mirror mode', () => {
@@ -111,10 +89,6 @@ test('tab presses Tab in the terminal (selector auto-advance)', () => {
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'tab' });
 });
 
-test('arrows are ignored in the picker', () => {
-  assert.equal(interpretKey(PICKER(), 'down', ctx()).action.kind, 'none');
-});
-
 test('opt+arrows send real arrow keys to the terminal (drive its selector)', () => {
   const r = interpretKey(MIRROR(''), 'opt+up', ctx({ awaiting: true }));
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'up' });
@@ -130,7 +104,7 @@ test('shift+esc interrupts the terminal activity and keeps the input', () => {
   assert.equal(r.state.input, 'my draft');
 });
 
-test('shift+esc works with an empty input too (never opens the picker)', () => {
+test('shift+esc works with an empty input too', () => {
   const r = interpretKey(MIRROR(''), 'shift+esc', ctx({ awaiting: true }));
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'escape' });
   assert.equal(r.state.mode, 'mirror');

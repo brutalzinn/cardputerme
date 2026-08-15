@@ -21,6 +21,7 @@
 
 #include <M5Cardputer.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 #include <vector>
@@ -33,22 +34,16 @@
 #ifndef ENV_WIFI_PASS
 #define ENV_WIFI_PASS "YOUR_WIFI_PASSWORD"
 #endif
-#ifndef ENV_WS_HOST
-#define ENV_WS_HOST "192.168.0.149"
-#endif
-#ifndef ENV_WS_PORT
-#define ENV_WS_PORT 4711
-#endif
 #ifndef ENV_WRAP_COLS
 #define ENV_WRAP_COLS 20
 #endif
 
 const char* WIFI_SSID = ENV_WIFI_SSID;
 const char* WIFI_PASS = ENV_WIFI_PASS;
-const char* WS_HOST   = ENV_WS_HOST;
-const int   WS_PORT   = ENV_WS_PORT;
 const char* WS_PATH   = "/ws";
 const int   WRAP_COLS = ENV_WRAP_COLS;
+const int   BEACON_PORT = 8000;
+const unsigned long BEACON_TTL_MS = 6500;
 // ===================================================================
 
 // Screen geometry (Cardputer ADV = 240x135)

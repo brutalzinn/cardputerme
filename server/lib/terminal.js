@@ -92,36 +92,4 @@ function tmuxBackend({ session, scrollbackLines = 200, runner = run, typeDelayMs
   };
 }
 
-// Enumerate the live tmux sessions by name — feeds the session registry so the
-// device can pick any running session. tmux-specific; kept in the backend layer.
-async function listTmuxSessions(runner = run) {
-  const { code, stdout } = await runner('tmux', ['list-sessions', '-F', '#{session_name}']);
-  if (code !== 0) return [];
-  return stdout.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-async function listTmuxSessionsInfo(runner = run) {
-  const format = '#{session_name}\t#{session_activity}\t#{session_attached}\t#{pane_current_command}';
-  const { code, stdout } = await runner('tmux', ['list-sessions', '-F', format]);
-  if (code !== 0) return [];
-  const out = [];
-  for (const line of stdout.split('\n')) {
-    const s = line.trim();
-    if (!s) continue;
-    const parts = s.split('\t');
-    if (parts.length < 4) continue;
-    out.push({
-      name: parts[0],
-      activity: parseInt(parts[1], 10) || 0,
-      attached: parseInt(parts[2], 10) || 0,
-      command: parts[3],
-    });
-  }
-  return out;
-}
-
-async function killTmuxSession(name, runner = run) {
-  return (await runner('tmux', ['kill-session', '-t', '=' + name])).code === 0;
-}
-
-module.exports = { tmuxBackend, listTmuxSessions, listTmuxSessionsInfo, killTmuxSession, run };
+module.exports = { tmuxBackend, run };

@@ -23,9 +23,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const { sliceIntoCards, toAscii, wrapLine } = require('./lib/format');
 const { parseChoices, endsWithQuestion, trimEnd } = require('./lib/detect');
-const { tmuxBackend, listTmuxSessions, listTmuxSessionsInfo, killTmuxSession } = require('./lib/terminal');
-const { createRegistry } = require('./lib/sessions');
-const { sessionsToClear } = require('./lib/idle');
+const { tmuxBackend } = require('./lib/terminal');
 const { pickPort, freePortProbe } = require('./lib/discovery');
 const { beaconMessage, BEACON_PORT, BEACON_ADDR, BEACON_INTERVAL_MS } = require('./lib/beacon');
 const net = require('net');
@@ -57,29 +55,20 @@ const PORT_START = 8001;
 const PORT_TRIES = 255;
 // Optional default session to pre-select. The user need NOT know any session
 // name — sessions are auto-discovered and picked on the device. Empty = none.
-const DEFAULT_SESSION = process.env.SESSION || process.env.TMUX_SESSION || '';
+const NAME = process.env.SESSION || 'cardputerme';
 const SESSION_CWD = process.env.SESSION_CWD || '';
-const SINGLE = DEFAULT_SESSION !== '';
 const WRAP_COLS = parseInt(process.env.WRAP_COLS || '20', 10);
 const LINES_PER_CARD = parseInt(process.env.LINES_PER_CARD || '7', 10);
 const SCROLLBACK_LINES = parseInt(process.env.SCROLLBACK_LINES || '200', 10);
 const MAX_CARDS = parseInt(process.env.MAX_CARDS || '40', 10);
 const NOTIFY = (process.env.NOTIFY || '1') !== '0';
-const IDLE_MINUTES = parseInt(process.env.IDLE_MINUTES || '30', 10);
 
-// ---- session registry (one server, many named sessions) --------------------
-// The core reads/writes through the SELECTED session's adapter, never a single
-// hard-wired one. Live tmux sessions are auto-registered by name; the device
-// lists them and selects one over the ONE WebSocket (no per-session port).
-// tmux is today's backend; a PTY-owned shell drops in with the same interface.
-const registry = createRegistry();
-function makeBackend(session) {
-  return tmuxBackend({ session, scrollbackLines: SCROLLBACK_LINES });
-}
-let activeSessionName = DEFAULT_SESSION;
+// ---- the ONE terminal this server exposes -----------------------------------
+// Server-per-exposure: `cardputerme [name]` spawns this server for exactly one
+// terminal. tmux is today's backend; a PTY drops in with the same interface.
+const terminal = tmuxBackend({ session: NAME, scrollbackLines: SCROLLBACK_LINES });
 // UI interaction state, driven entirely server-side by the input FSM (lib/input).
-// 'mirror' = showing a session; 'picker' = the numbered session menu. `input` is
-// the SERVER-owned compose buffer (the lazy device only forwards keys).
+// `input` is the SERVER-owned compose buffer (the lazy device only forwards keys).
 let uiState = { mode: 'mirror', input: '', hist: null };
 // Sent-command history (newest last) — recalled with ctrl+;/ctrl+. like a shell.
 const history = [];
@@ -98,35 +87,12 @@ function clamp(v, lo, hi) {
   return v;
 }
 
-// Auto-discover live sessions and register any we don't know yet; keep the
-// active selection valid. The user never types a session name — sessions are
-// found here and picked on the device. Cheap; safe to call often.
-async function refreshSessions() {
-  if (SINGLE) {
-    if (!registry.has(DEFAULT_SESSION)) registry.add(DEFAULT_SESSION, makeBackend(DEFAULT_SESSION));
-    activeSessionName = DEFAULT_SESSION;
-    return;
-  }
-  const live = await listTmuxSessions();
-  registry.prune(live);
-  for (const name of live) {
-    if (registry.has(name)) continue;
-    registry.add(name, makeBackend(name));
-  }
-  // Honor an optional pre-selected default even if it isn't live yet.
-  if (DEFAULT_SESSION && !registry.has(DEFAULT_SESSION)) registry.add(DEFAULT_SESSION, makeBackend(DEFAULT_SESSION));
-  if (!activeSessionName || !registry.has(activeSessionName)) activeSessionName = registry.names()[0] || '';
-}
-
-// The adapter for the currently-selected session (always defined).
 function activeTerminal() {
-  const entry = registry.get(activeSessionName);
-  if (entry) return entry.backend;
-  return makeBackend(activeSessionName);
+  return terminal;
 }
 
 // ---- build cards -----------------------------------------------------------
-const NO_SESSION = 'No active session.\nOpen a terminal session\nand pick it on the\ndevice.';
+const NO_SESSION = 'Terminal is gone.\nRun cardputerme on\nthe computer to\nexpose it again.';
 
 // Reinterpret the terminal screen for the Cardputer: find a "choose one" prompt
 // (create file? run plan? proceed?) that lives in the TUI, not the transcript.
@@ -196,16 +162,9 @@ function splitScreen(pane) {
 // Build the current screen: body lines + a status string. NO modes/transcript;
 // same generic path for every CLI. The device renders this via lib/display.
 async function buildState() {
-  // Picker mode: a plain NUMBERED TEXT menu (Telegram-style); pick by number.
-  if (uiState.mode === 'picker') {
-    const names = registry.names();
-    const menu = ['Pick a session:', ''].concat(names.map((n, i) => `${i + 1}. ${n}`));
-    return { lines: screenLines(menu.join('\n')), status: '` cancel | press a number', sessionExists: true, awaiting: false };
-  }
-
   const term = activeTerminal();
   if (!(await term.exists())) {
-    return { lines: screenLines(NO_SESSION), status: 'no active session', sessionExists: false, awaiting: false };
+    return { lines: screenLines(NO_SESSION), status: 'terminal gone', sessionExists: false, awaiting: false };
   }
   const pane = await term.capture();          // includes ANSI colour escapes (-e)
 
@@ -263,30 +222,14 @@ function composeMirror(grid, status, awaiting) {
   }
   const hint = awaiting ? 'PROMPT: press a number' : status;
   const bar = `${hint}  r${view.row}/${maxRow} c${view.col}`;
-  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${bar}`, sessionExists: true, awaiting };
+  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${NAME}] ${bar}`, sessionExists: true, awaiting };
 }
 
 // ---- HTTP (debugging only) -------------------------------------------------
 const app = express();
 app.use(express.json({ limit: '64kb' }));
 app.get('/health', async (_req, res) => {
-  await refreshSessions();
-  res.json({ ok: true, active: activeSessionName, sessions: registry.list(), exists: await activeTerminal().exists(), notify: NOTIFY, awaiting: lastAwaiting });
-});
-// The session list + current selection (the device's picker reads this).
-app.get('/sessions', async (_req, res) => {
-  await refreshSessions();
-  res.json({ active: activeSessionName, sessions: registry.list() });
-});
-// Select the active session by name — the user never types a tmux name; they
-// pick from the auto-discovered list.
-app.post('/select', async (req, res) => {
-  const name = req.body && typeof req.body.name === 'string' ? req.body.name : '';
-  await refreshSessions();
-  if (!registry.has(name)) return res.status(404).json({ ok: false, error: `unknown session '${name}'` });
-  activeSessionName = name;
-  pushIfChanged(true).catch(() => {});
-  res.json({ ok: true, active: activeSessionName });
+  res.json({ ok: true, name: NAME, exists: await activeTerminal().exists(), notify: NOTIFY, awaiting: lastAwaiting });
 });
 app.get('/cards', async (_req, res) => {
   const st = await buildState();
@@ -313,10 +256,6 @@ let lastAwaiting = false;
 function displayMessage(st) {
   return JSON.stringify(buildDisplay(st.lines, st.status, { awaiting: st.awaiting }));
 }
-// The session list + current selection — the device's picker renders this.
-function sessionsMessage() {
-  return JSON.stringify({ type: 'sessions', active: activeSessionName, sessions: registry.list() });
-}
 function broadcast(str) {
   for (const c of wss.clients) if (c.readyState === 1) c.send(str);
 }
@@ -339,9 +278,8 @@ async function pushIfChanged(force) {
 // This is the whole lazy-device contract: the server owns the input buffer and
 // every special function; the device only reported a keypress.
 async function applyKey(key) {
-  const { state, action } = interpretKey(uiState, key, { sessions: registry.names(), awaiting: lastAwaiting, history });
+  const { state, action } = interpretKey(uiState, key, { awaiting: lastAwaiting, history });
   uiState = state;
-  if (action.kind === 'select') { activeSessionName = action.name; view = { row: 0, col: 0, follow: true, selRow: -1 }; }
   if (action.kind === 'pan') view = Object.assign({}, view, panViewport(view, action.key));
   if (action.kind === 'send') {
     history.push(action.text);                                   // shell-style recall (ctrl+up)
@@ -370,34 +308,17 @@ wss.on('connection', async (ws, req) => {
   console.log(`[ws] connect ${who} (clients=${wss.clients.size})`);
   ws.on('close', (code, reason) => console.log(`[ws] close ${who} code=${code} ${String(reason || '')}`));
   ws.on('error', (e) => console.log(`[ws] error ${who} ${e && e.message}`));
-  // Send the session list + current screen immediately to the newcomer.
-  await refreshSessions();
+  // Send the current screen immediately to the newcomer.
   const st = await buildState();
-  ws.send(sessionsMessage());
   ws.send(displayMessage(st));
 
   ws.on('message', async (data) => {
     let m; try { m = JSON.parse(data.toString()); } catch { return; }
     if (!m || typeof m.type !== 'string') return;
 
-    // Pick a session by name (from the device's picker).
-    if (m.type === 'selectSession' && typeof m.name === 'string') {
-      await refreshSessions();
-      if (!registry.has(m.name)) return;
-      activeSessionName = m.name;
-      ws.send(sessionsMessage());
-      pushIfChanged(true).catch(() => {});
-      return;
-    }
     // Every raw key goes through the FSM (lazy device: the server owns input).
     if (m.type === 'key' && typeof m.key === 'string') {
       await applyKey(m.key);
-      return;
-    }
-    // Ask for the current session list.
-    if (m.type === 'listSessions') {
-      await refreshSessions();
-      ws.send(sessionsMessage());
       return;
     }
     // Legacy whole-text command (older firmware's local input mode): feed each
@@ -410,21 +331,9 @@ wss.on('connection', async (ws, req) => {
   });
 });
 
-async function sweepIdleSessions() {
-  const infos = await listTmuxSessionsInfo();
-  const nowSec = Math.floor(Date.now() / 1000);
-  const idle = sessionsToClear(infos, { nowSec, timeoutSec: IDLE_MINUTES * 60, active: activeSessionName });
-  if (idle.length === 0) return;
-  for (const name of idle) await killTmuxSession(name);
-  console.log(`[idle] cleared: ${idle.join(', ')}`);
-  await refreshSessions();
-  broadcast(sessionsMessage());
-  pushIfChanged(true).catch(() => {});
-}
-if (IDLE_MINUTES > 0 && !SINGLE) setInterval(() => { sweepIdleSessions().catch(() => {}); }, 60000);
-if (SINGLE) setInterval(async () => {
-  if (await activeTerminal().exists()) return;
-  console.log(`[expose] session '${DEFAULT_SESSION}' is gone — shutting down`);
+setInterval(async () => {
+  if (await terminal.exists()) return;
+  console.log(`[expose] terminal '${NAME}' is gone — shutting down`);
   process.exit(0);
 }, 60000);
 
@@ -438,7 +347,7 @@ function startBeacon(port) {
   const sock = dgram.createSocket('udp4');
   sock.on('error', () => {});
   sock.bind(() => sock.setBroadcast(true));
-  const msg = Buffer.from(beaconMessage(DEFAULT_SESSION || 'cardputerme', port));
+  const msg = Buffer.from(beaconMessage(NAME, port));
   setInterval(() => sock.send(msg, 0, msg.length, BEACON_PORT, BEACON_ADDR), BEACON_INTERVAL_MS);
   console.log(`  beacon : udp ${BEACON_ADDR}:${BEACON_PORT} every ${BEACON_INTERVAL_MS}ms`);
 }
@@ -450,15 +359,9 @@ async function start() {
     process.exit(1);
   }
   server.listen(port, '0.0.0.0', async () => {
-    console.log(`cardputerme — terminal remote on http://0.0.0.0:${port}  (ws://…/ws)`);
-    console.log(`  cards  : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines | notify: ${NOTIFY ? 'on' : 'off'}`);
-    // `cardputerme <name>` EXPOSES a session by that name — create it if missing.
-    if (DEFAULT_SESSION) {
-      const created = await makeBackend(DEFAULT_SESSION).ensureSession(SESSION_CWD);
-      if (!created) console.log(`  ! could not create session '${DEFAULT_SESSION}'`);
-    }
-    await refreshSessions();
-    console.log(`  sessions: ${registry.names().join(', ') || '(none yet)'} | active: ${activeSessionName || '(none)'}`);
+    console.log(`cardputerme — exposing '${NAME}' on http://0.0.0.0:${port}  (ws://…/ws)`);
+    const created = await terminal.ensureSession(SESSION_CWD);
+    if (!created) console.log(`  ! could not create terminal '${NAME}'`);
     startBeacon(port);
   });
 }
