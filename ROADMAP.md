@@ -15,7 +15,8 @@ Current: **#8 E2E verification** — run the 10-item device checklist; fix failu
    - ✅ R1 (2026-08-15): question text unreadable while choosing (view orbited the wrapping pointer) → viewport now ANCHORS the pointer near the view bottom so the question above fills the screen (`anchorRow`, lib/viewport.js; 88/88). Server restart picks it up.
    - ✅ R2 (2026-08-15): battery % in the top header (green >20%, orange ≤20%, refresh 15s) — flashed.
    - ✅ R3 (2026-08-15, user-decided): **arrows read, numbers choose** — bare arrows ALWAYS pan (read anything, even during questions); digits answer menu options; opt+arrows now send real arrow keys (drive the terminal's own selector); Enter confirms. lib/input.js FSM swap; 86/86.
-   - ⏭ Next: user checkpoint-commits, then the comment-strip sweep (see #9f), then retest questions on-device.
+   - ✅ R4 (2026-08-15): **session lifecycle DX** — idle unattached shells auto-clear after `IDLE_MINUTES` (default 30; `lib/idle.js` `sessionsToClear` + `killTmuxSession`, 60s sweep in server.js, never the active/attached session); `registry.prune` drops dead sessions from the picker; `cardputerme` with no arg names the session after the cwd + reuses an already-running server (`bin/cardputer-server`). 99/99. **Uncommitted** — protect in the checkpoint commit.
+   - ⏭ Next: user checkpoint-commits (now incl. R4 idle-sweep + launcher work), then the comment-strip sweep (see #9f), then retest questions on-device.
 > 🚀 **Deploy (end of Day 1)** — all 10 pass on the physical device.
 
 **📅 Day 2 — 2026-08-15 · Reviewed cleanup (4-agent /simplify findings, approved)**
@@ -43,7 +44,7 @@ PTY backend (drop-in via adapter; enables "expose ANY window" fully — run `car
 
 ---
 ## Reference
-- **Run:** `cardputerme [name]` (alias in ~/.zshrc) or `./bin/cardputer-server`; ONE port `:4711`, ONE WS. Device: `ws://192.168.0.149:4711/ws` (baked in firmware/.env).
-- **Tests:** `cd server && npm test` (86 pass). **Flash:** `cd firmware/cardputer-claude && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's).
+- **Run:** `cardputerme [name]` (alias in ~/.zshrc) or `./bin/cardputer-server`; no arg → session named after the cwd, started IN it; if the server already runs on `:4711` the session is just created (auto-discovered). ONE port, ONE WS. Device: `ws://192.168.0.149:4711/ws` (baked in firmware/.env). Idle unattached shells auto-clear (`IDLE_MINUTES`, default 30; 0 disables).
+- **Tests:** `cd server && npm test` (99 pass). **Flash:** `cd firmware/cardputer-claude && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's).
 - **Keys:** chars type · Enter send/confirm · Shift+Enter newline · esc clear→picker · shift+esc interrupt · Tab · **arrows read (pan) · numbers choose** · opt+arrows real arrow keys (drive TUI selector) · ctrl+letter control-key · ctrl+fn-↑/↓ history.
 - **Method:** WIP=1; one 🟡 = one started tasks.roblab.app task. Quiet work (no agent fan-out spam — user watches via the device).
