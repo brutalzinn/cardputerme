@@ -10,8 +10,8 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "cardputerme — '$NAME' is already exposed (pick it on the Cardputer)"
   exit 0
 fi
-cd "$ROOT/server"
-[ -d node_modules ] || npm install --no-audit --no-fund >/dev/null 2>&1
-SESSION="$NAME" SESSION_CWD="$DIR" nohup node server.js >>"$STATE/$NAME.log" 2>&1 &
+BIN="$ROOT/server-go/cardputerme"
+(cd "$ROOT/server-go" && go build -o cardputerme .)
+SESSION="$NAME" SESSION_CWD="$DIR" nohup "$BIN" >>"$STATE/$NAME.log" 2>&1 &
 echo "$!" >"$PID_FILE"
 echo "cardputerme — exposing '$NAME' (find it on the Cardputer) | log: $STATE/$NAME.log"
