@@ -28,7 +28,7 @@ func TestLaterRepeatsUseTheInterval(t *testing.T) {
 	h := NewHolder(policy)
 	now := time.Now()
 	h.Down("fn+up", now)
-	h.Fired(now.Add(policy.Delay))
+	h.Fired()
 	d, ok := h.Next(now.Add(policy.Delay))
 	if !ok || d != policy.Interval {
 		t.Fatalf("got %v ok=%v", d, ok)
@@ -59,7 +59,7 @@ func TestANewKeyTakesOverFromTheOldOne(t *testing.T) {
 	h := NewHolder(policy)
 	now := time.Now()
 	h.Down("fn+up", now)
-	h.Fired(now)
+	h.Fired()
 	h.Down("fn+down", now)
 	if got := h.Key(); got != "fn+down" {
 		t.Fatalf("got %q", got)

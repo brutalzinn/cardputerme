@@ -73,16 +73,16 @@ func (b *Backend) Exists() bool {
 	return code == 0
 }
 
-func (b *Backend) EnsureSession(cwd string) bool {
-	if code, _ := tmux("has-session", "-t", b.session); code == 0 {
-		return true
+func (b *Backend) EnsureSession(cwd string) (created, ok bool) {
+	if b.Exists() {
+		return false, true
 	}
 	args := []string{"new-session", "-d", "-s", b.session}
 	if cwd != "" {
 		args = append(args, "-c", cwd)
 	}
 	code, _ := tmux(args...)
-	return code == 0
+	return true, code == 0
 }
 
 // Capture returns the visible pane text (with ANSI), or ("", false) if the

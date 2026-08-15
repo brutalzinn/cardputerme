@@ -43,12 +43,13 @@ func envStr(key, def string) string {
 
 func main() {
 	log.SetFlags(0)
-	cwd, _ := os.Getwd()
-	name := sessionName(os.Args[1:], os.Getenv, envStr("SESSION_CWD", cwd))
+	wd, _ := os.Getwd()
+	cwd := envStr("SESSION_CWD", wd)
+	name := sessionName(os.Args[1:], os.Getenv, cwd)
 	cfg := server.Config{
 		Name:            name,
-		Session:         envStr("TMUX_SESSION", envStr("SESSION", name)),
-		SessionCwd:      envStr("SESSION_CWD", cwd),
+		Session:         envStr("SESSION", name),
+		SessionCwd:      cwd,
 		WrapCols:        envInt("WRAP_COLS", 20),
 		LinesPerCard:    envInt("LINES_PER_CARD", 7),
 		ScrollbackLines: envInt("SCROLLBACK_LINES", 200),

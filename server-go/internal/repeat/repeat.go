@@ -39,18 +39,10 @@ func (h *Holder) Up(key string) bool {
 		return false
 	}
 	h.key = ""
-	h.fired = false
 	return true
 }
 
-func (h *Holder) Release() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.key = ""
-	h.fired = false
-}
-
-func (h *Holder) Fired(now time.Time) {
+func (h *Holder) Fired() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.fired = true

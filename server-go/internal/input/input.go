@@ -8,9 +8,10 @@ type State struct {
 }
 
 type Action struct {
-	Kind string // none | send | pressKey | pan
-	Key  string
-	Text string
+	Kind   string // none | send | pressKey | pan
+	Key    string
+	Text   string
+	Repeat bool // safe to fire again while the key is held
 }
 
 type Result struct {
@@ -63,7 +64,9 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 	input := state.Input
 	hist := state.Hist
 	mirror := func(newInput string, newHist int) State { return State{Input: newInput, Hist: newHist} }
-	press := func(s State, k string) Result { return Result{s, Action{Kind: "pressKey", Key: k}} }
+	press := func(s State, k string) Result {
+		return Result{s, Action{Kind: "pressKey", Key: k, Repeat: arrows[k]}}
+	}
 	quiet := func(s State) Result { return Result{s, Action{Kind: "none"}} }
 
 	mod, base := splitMod(key)
@@ -144,7 +147,7 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 		return press(state, "tab")
 	}
 	if arrows[key] {
-		return Result{state, Action{Kind: "pan", Key: key}}
+		return Result{state, Action{Kind: "pan", Key: key, Repeat: true}}
 	}
 	if len(key) == 1 {
 		if ctx.Awaiting && input == "" && isDigits(key) {

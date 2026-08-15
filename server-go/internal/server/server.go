@@ -35,18 +35,6 @@ const (
 	repeatMaxHold  = 10 * time.Second
 )
 
-var repeatArrows = map[string]bool{"up": true, "down": true, "left": true, "right": true}
-
-func repeatableAction(a input.Action) bool {
-	if a.Kind == "pan" {
-		return true
-	}
-	if a.Kind == "pressKey" {
-		return repeatArrows[a.Key]
-	}
-	return false
-}
-
 // Config is everything the CLI passes in; there are no package globals.
 type Config struct {
 	Name            string
@@ -98,13 +86,11 @@ type Server struct {
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
 
-	power      *power.Tracker
-	powerMu    sync.Mutex
-	powerTimer *time.Timer
+	power         *power.Tracker
+	powerDeadline deadline
 
-	repeat      *repeat.Holder
-	repeatMu    sync.Mutex
-	repeatTimer *time.Timer
+	repeat         *repeat.Holder
+	repeatDeadline deadline
 }
 
 const (
@@ -113,7 +99,7 @@ const (
 	sizeMax  = 3
 )
 
-func tmuxTarget(cfg Config) string {
+func sessionTarget(cfg Config) string {
 	if cfg.Session != "" {
 		return cfg.Session
 	}
@@ -123,7 +109,7 @@ func tmuxTarget(cfg Config) string {
 func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
-		backend:  terminal.CreateBackend(tmuxTarget(cfg), cfg.ScrollbackLines),
+		backend:  terminal.CreateBackend(sessionTarget(cfg), cfg.ScrollbackLines),
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		view:     screen.View{Follow: true, SelRow: -1},
@@ -351,22 +337,12 @@ func (s *Server) applyPower(st power.State, changed bool) {
 }
 
 func (s *Server) armPowerTimer() {
-	d := s.power.Until(time.Now())
-	s.powerMu.Lock()
-	defer s.powerMu.Unlock()
-	if s.powerTimer != nil {
-		s.powerTimer.Stop()
-		s.powerTimer = nil
-	}
-	if d <= 0 {
-		return
-	}
-	s.powerTimer = time.AfterFunc(d, func() {
+	s.powerDeadline.arm(s.power.Until(time.Now()), func() {
 		s.applyPower(s.power.At(time.Now()))
 	})
 }
 
-func (s *Server) applyKey(key string) bool {
+func (s *Server) applyKey(key string) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
@@ -396,7 +372,11 @@ func (s *Server) applyKey(key string) bool {
 	}
 	var echo string
 	if s.cache != nil {
-		echo = displayMessage(s.composeMirror(s.cache.grid, s.cache.status, s.cache.awaiting))
+		st := s.composeMirror(s.cache.grid, s.cache.status, s.cache.awaiting)
+		if sg := sig(st); sg != s.lastSig {
+			s.lastSig = sg
+			echo = displayMessage(st)
+		}
 	}
 	s.mu.Unlock()
 
@@ -409,14 +389,16 @@ func (s *Server) applyKey(key string) bool {
 	if echo != "" {
 		s.hub.broadcast(echo)
 	}
-	return repeatableAction(a)
+	return a
 }
 
 func (s *Server) keyDown(key string, now time.Time) {
-	if !s.applyKey(key) {
-		s.repeat.Release()
-		s.armRepeatTimer()
-		return
+	if s.power.State() == power.Off {
+		s.applyPower(s.power.Wake(now))
+		key = ""
+	}
+	if key != "" && !s.applyKey(key).Repeat {
+		key = ""
 	}
 	s.repeat.Down(key, now)
 	s.armRepeatTimer()
@@ -431,21 +413,15 @@ func (s *Server) keyUp(key string) {
 
 func (s *Server) armRepeatTimer() {
 	d, ok := s.repeat.Next(time.Now())
-	s.repeatMu.Lock()
-	defer s.repeatMu.Unlock()
-	if s.repeatTimer != nil {
-		s.repeatTimer.Stop()
-		s.repeatTimer = nil
-	}
 	if !ok {
-		return
+		d = 0
 	}
-	s.repeatTimer = time.AfterFunc(d, func() {
+	s.repeatDeadline.arm(d, func() {
 		key := s.repeat.Key()
 		if key == "" {
 			return
 		}
-		s.repeat.Fired(time.Now())
+		s.repeat.Fired()
 		s.applyKey(key)
 		s.armRepeatTimer()
 	})
@@ -596,11 +572,13 @@ func (s *Server) Run() error {
 	if port == 0 {
 		return fmt.Errorf("no free port between %d and %d", portStart, portStart+portTries-1)
 	}
-	if !s.backend.Exists() {
-		log.Printf("[expose] no terminal '%s' was running — created an empty one; run cardputerme from inside the terminal you want mirrored", tmuxTarget(s.cfg))
+	target := sessionTarget(s.cfg)
+	created, ok := s.backend.EnsureSession(s.cfg.SessionCwd)
+	if !ok {
+		return fmt.Errorf("could not attach to or create terminal '%s'", target)
 	}
-	if !s.backend.EnsureSession(s.cfg.SessionCwd) {
-		return fmt.Errorf("could not attach to or create terminal '%s'", tmuxTarget(s.cfg))
+	if created {
+		log.Printf("[expose] no terminal '%s' was running — created an empty one; run cardputerme from inside the terminal you want mirrored", target)
 	}
 
 	mux := http.NewServeMux()

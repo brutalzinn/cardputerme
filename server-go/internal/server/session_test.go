@@ -3,13 +3,13 @@ package server
 import "testing"
 
 func TestTmuxTargetIsTheSessionNotTheLabel(t *testing.T) {
-	if got := tmuxTarget(Config{Name: "cardputerme", Session: "claude-3"}); got != "claude-3" {
+	if got := sessionTarget(Config{Name: "cardputerme", Session: "claude-3"}); got != "claude-3" {
 		t.Fatalf("the backend must attach to the real tmux session, got %q", got)
 	}
 }
 
 func TestLabelIsTheTargetWhenNoSessionIsGiven(t *testing.T) {
-	if got := tmuxTarget(Config{Name: "cardputerme"}); got != "cardputerme" {
+	if got := sessionTarget(Config{Name: "cardputerme"}); got != "cardputerme" {
 		t.Fatalf("got %q", got)
 	}
 }

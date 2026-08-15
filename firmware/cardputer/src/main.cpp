@@ -426,7 +426,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
-String g_heldKey = "";
+char g_heldKey[24];
 
 void sendKeyState(const char* key, const char* state) {
   JsonDocument doc;
@@ -437,14 +437,15 @@ void sendKeyState(const char* key, const char* state) {
 }
 
 void sendKey(const char* key) {
-  g_heldKey = key;
+  strncpy(g_heldKey, key, sizeof(g_heldKey) - 1);
+  g_heldKey[sizeof(g_heldKey) - 1] = 0;
   sendKeyState(key, "down");
 }
 
 void releaseKey() {
-  if (g_heldKey.length() == 0) return;
-  sendKeyState(g_heldKey.c_str(), "up");
-  g_heldKey = "";
+  if (g_heldKey[0] == 0) return;
+  sendKeyState(g_heldKey, "up");
+  g_heldKey[0] = 0;
 }
 
 const char* arrowFor(char c) {
@@ -484,16 +485,11 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
   if (st.enter && !st.shift) sendKey("enter");
 }
 
-void handleKeyPress(const Keyboard_Class::KeysState& st) {
-  if (g_power == POWER_OFF) { requestWake(); return; }
-  if (g_power == POWER_DIM) requestWake();
-  handleKeys(st);
-}
-
 void handleKeyboard() {
   if (!M5Cardputer.Keyboard.isChange()) return;
   if (!M5Cardputer.Keyboard.isPressed()) { releaseKey(); return; }
-  handleKeyPress(M5Cardputer.Keyboard.keysState());
+  if (g_power != POWER_ON) applyPower(POWER_ON);
+  handleKeys(M5Cardputer.Keyboard.keysState());
 }
 
 void setup() {

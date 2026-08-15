@@ -2,54 +2,79 @@ package server
 
 import (
 	"testing"
+	"time"
 
-	"cardputerme/internal/input"
+	"cardputerme/internal/power"
 )
 
-func TestScrollingRepeats(t *testing.T) {
-	if !repeatableAction(input.Action{Kind: "pan", Key: "up"}) {
-		t.Fatal("panning the terminal history is the whole point of holding a key")
+func TestHoldingAnArrowKeepsItHeld(t *testing.T) {
+	s := testServer()
+	s.keyDown("up", time.Now())
+	if got := s.repeat.Key(); got != "up" {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestArrowsSentToTheTerminalRepeat(t *testing.T) {
-	for _, k := range []string{"up", "down", "left", "right"} {
-		if !repeatableAction(input.Action{Kind: "pressKey", Key: k}) {
-			t.Fatalf("%q should repeat", k)
-		}
+func TestTypingHoldsNothing(t *testing.T) {
+	s := testServer()
+	s.keyDown("a", time.Now())
+	if got := s.repeat.Key(); got != "" {
+		t.Fatalf("holding a letter must not arm a repeat, got %q", got)
 	}
 }
 
-func TestTypingNeverRepeats(t *testing.T) {
-	if repeatableAction(input.Action{Kind: "none"}) {
-		t.Fatal("holding a letter must not spam the input buffer")
+func TestReleasingClearsTheHold(t *testing.T) {
+	s := testServer()
+	s.keyDown("up", time.Now())
+	s.keyUp("up")
+	if got := s.repeat.Key(); got != "" {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestSendingNeverRepeats(t *testing.T) {
-	if repeatableAction(input.Action{Kind: "send", Text: "ls"}) {
-		t.Fatal("holding enter must not resubmit the command")
-	}
-}
-
-func TestNonArrowKeyPressesDoNotRepeat(t *testing.T) {
-	for _, k := range []string{"enter", "escape", "tab", "ctrl+c"} {
-		if repeatableAction(input.Action{Kind: "pressKey", Key: k}) {
-			t.Fatalf("%q should not repeat", k)
-		}
-	}
-}
-
-func TestZoomDoesNotRepeat(t *testing.T) {
-	if repeatableAction(input.Action{Kind: "zoom", Key: "in"}) {
-		t.Fatal("holding zoom would run away through the size range")
-	}
-}
-
-func TestATapStillWorksWithoutAHoldState(t *testing.T) {
+func TestAStrayReleaseIsHarmless(t *testing.T) {
 	s := testServer()
 	s.keyUp("up")
 	if got := s.repeat.Key(); got != "" {
-		t.Fatalf("a stray release must leave nothing held, got %q", got)
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAKeyOnADarkScreenOnlyWakesIt(t *testing.T) {
+	s := testServer()
+	s.power.Sleep(time.Now())
+	s.keyDown("a", time.Now())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.input != "" {
+		t.Fatalf("a keypress on a dark screen must be swallowed, got %q", s.input)
+	}
+	if got := s.power.State(); got != power.On {
+		t.Fatalf("it must still wake the screen, got %q", got)
+	}
+}
+
+func TestTheNextKeyAfterWakingIsTyped(t *testing.T) {
+	s := testServer()
+	s.power.Sleep(time.Now())
+	s.keyDown("a", time.Now())
+	s.keyDown("b", time.Now())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.input != "b" {
+		t.Fatalf("got %q", s.input)
+	}
+}
+
+func TestADimScreenStillTakesTheKey(t *testing.T) {
+	s := sleepyServer()
+	if st, _ := s.power.At(time.Now().Add(45 * time.Second)); st != power.Dim {
+		t.Fatalf("setup: expected a dimmed screen, got %q", st)
+	}
+	s.keyDown("a", time.Now())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.input != "a" {
+		t.Fatalf("a dim screen is readable, so the key must go through, got %q", s.input)
 	}
 }

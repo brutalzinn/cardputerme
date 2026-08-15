@@ -10,7 +10,7 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 NAME="${1:-${NAME:-$(basename "$PWD")}}"
-TMUX_SESSION="${TMUX_SESSION:-$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "$NAME")}"
+SESSION="${SESSION:-$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "$NAME")}"
 if [ -z "$TMUX" ]; then
   echo "cardputerme — this terminal is not inside tmux, so there is nothing to mirror yet." >&2
   echo "  exposing a NEW empty terminal named '$NAME'." >&2
@@ -50,6 +50,6 @@ else
   echo "  install it: curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh" >&2
   exit 1
 fi
-SESSION_CWD="$DIR" TMUX_SESSION="$TMUX_SESSION" nohup "$BIN" "$NAME" >>"$STATE/$NAME.log" 2>&1 &
+SESSION_CWD="$DIR" SESSION="$SESSION" nohup "$BIN" "$NAME" >>"$STATE/$NAME.log" 2>&1 &
 echo "$!" >"$PID_FILE"
 echo "cardputerme — exposing '$NAME' (find it on the Cardputer) | log: $STATE/$NAME.log"
