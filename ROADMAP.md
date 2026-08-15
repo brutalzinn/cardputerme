@@ -1,46 +1,45 @@
 # cardputerme — Roadmap
-> Updated 2026-08-14. Focus: an **agnostic** CLI that exposes a terminal session over WebSocket to a Cardputer — independent of tmux, Claude Code, hooks, regex, and model tokens. Terse; `git log` holds detail.
+> Updated 2026-08-14 (night). Focus: **prove the integration really works** (user-run E2E), then land the reviewed cleanup. Terse; `git log` holds detail.
 
 ## What is cardputerme
-A **CLI app** you run in a terminal: it exposes **one WebSocket server** so an **M5Cardputer** can drive terminal sessions. **ONE server exposes MULTIPLE named sessions** over a **single WebSocket / single port** — the device picks a session by name (custom name or a random UUID). One port, no multi-port handling. Fully **agnostic** — works with plain `bash`, Claude Code, or any other agent/CLI; it doesn't matter whether the user is in tmux or bash. Stack: Node `express`+`ws`, ESP32-S3 firmware (M5Cardputer). House rules: **no hooks, no regex, no model tokens, independent of any external application** — deterministic local algorithms only. **Thin frontend**: the **server holds ALL rules and sends exactly what to display** (cards, menus, colors-by-role); the device just renders + forwards keys — so a color/rule tweak is a backend edit, **never a device re-flash**.
-
-## Focus — the generic protocol (server describes, device renders)
-The Cardputer is a **pure client**: it draws a generic **display message** (a list of lines/segments, each `text + font + color + fit`) and **forwards raw keypresses**. It holds **no state and no logic**. The **server owns everything** — it composes every screen (mirror, prompt, menu/picker *with the highlight*, toast) and runs the whole **interaction engine** (paging, mode, input buffer, selection, gestures like **Esc twice → server picker**). No semantic roles on the wire; the device never knows if content is an agent, a response, a question, or a menu. Why: all evolution happens server-side, so the system grows more generic and complete over time and the **firmware never needs re-flashing**. "Done" = every screen *and* interaction is server-driven; the firmware is just forward-keys + draw.
+**Expose ANY terminal window/session to an M5Cardputer.** One command (`cardputerme [name]` — zsh alias → `bin/cardputer-server`) exposes this machine; the device auto-lists sessions and drives whichever you pick over ONE WebSocket. Fully agnostic: the user NEVER knows how a session is hosted (tmux is an invisible, swappable backend inside `lib/terminal.js` only); the whole system is exactly **our server + our firmware**. Thin device: draws the server-described display (text+color per line + status bar w/ marquee), forwards raw keys; the **server owns everything** (input buffer, esc flows, pickers, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, KISS, TDD; device E2E is the user's.
 
 ## 🎯 Now
-Current: **#4 Display-message protocol** — server emits a generic `{lines:[{text,color,font,fit}]}` display message; the device renders it verbatim.
-> **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡; never lag. *(OpenTogg timer sync stopped for this project.)*
+Current: **#8 E2E verification** — run the 10-item device checklist; fix failures one at a time.
+> **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
 
-**📅 Day 1 — 2026-08-14 · Agnostic core (server)**
-1. ✅ **Agnostic prompt detection.** (See Done.)
-2. ✅ **Terminal adapter (tmux first).** (See Done.)
-> 🚀 **Deploy (end of Day 1)** — done: server restarted on the adapter; `npm test` 30/30; `/cards` mirrors session `generic`.
+**📅 Day 1 — 2026-08-14 · Prove it works**
+8. 🟡 **E2E verification (user-run).** *(current)* 10-item checklist: type/send · esc-clear · session picker · marquee · Ctrl+C · history (ctrl+fn-↑/↓) · shift+esc interrupt · choice panel (fn+↑/↓ + Enter, `>` pointer) · read-while-choosing (opt+arrows) · pan. Fix each failure immediately (server-side preferred; flash only if unavoidable).
+> 🚀 **Deploy (end of Day 1)** — all 10 pass on the physical device.
 
-**📅 Day 2 — 2026-08-15 · Generic protocol (server describes, device renders)**
-3. ✅ **Named sessions (one server, many).** (See Done.)
-4. 🟡 **Display-message protocol.** *(current)* Replace the ad-hoc `cards` push with ONE generic **display message** — `{ type:'display', lines:[{ text, color, font, fit }] }` — composed entirely server-side (a pure display-model builder over the screen state). No roles on the wire; move the firmware's `"> "` prompt inference here (server sets the color). TDD the pure builder (screen state → display message).
-5. ⬜ **Input engine (server-side FSM).** Device forwards every **raw keypress** (`{type:'key', key}`) and holds no state; the **server** owns the interaction FSM — paging, input buffer, session/menu selection, and **gestures (Esc twice → server picker)** — plus key-press simulation to the session (`Tab`/`Enter`/`Escape`/arrows via `terminal.sendKey`, lone digit answers a menu). TDD the FSM + key map (pure; fake runner).
-> 🚀 **Deploy (end of Day 2)** — server emits display messages + drives all nav; `npm test` green.
+**📅 Day 2 — 2026-08-15 · Reviewed cleanup (4-agent /simplify findings, approved)**
+9. ⬜ **Bypass/status bottom-chrome fix + cleanup queue.** (a) Status bar = the pane's bottom chrome block (bypass + status rows) joined for the marquee, dropped from the body. (b) Dead code purge (card pipeline, `detectChoice`, unread prompt-text assembly → `hasChoicePrompt`, unreachable color branches, unused `cwd`/`remove`/`run`, inert picker actions). (c) Reuse homes (`keepTail`/`isDigit`/tab-in-`toAscii`/native `trimEnd`). (d) Efficiency: pane-identity early-out, drop `exists()` from tick, parse rows once + cap first, ASCII fast-paths, one echo frame for legacy `cmd`, TTL on `refreshSessions`. (e) Altitude: extract tested `lib/screen.js` (pure `composeMirror`), unify `selectSession`/`submitText` across FSM/HTTP/WS, one state object, backend-neutral adapter exports (`createBackend`). All TDD; suite green each step.
+> 🚀 **Deploy (end of Day 2)** — restart server; payload ≪15KB; idle CPU visibly down; behavior unchanged on device.
 
-**📅 Day 3 — 2026-08-16 · Server-rendered menus + thin firmware + prove**
-6. ⬜ **Server-rendered menus/picker (numbered text, Telegram-style).** The server composes menus as **plain numbered text** display messages — **server picker** (by computer/host name) → **session picker** (by name) — and the user **selects by pressing the number** (reuses the digit-select path; no arrows/highlight). The device just shows the text + forwards the digit; the server maps number→session and switches. Same pattern as a CLI's own `1./2.` option menu.
-7. ⬜ **Thin-render firmware + prove.** Shrink `main.cpp` to "forward keys + draw the display message" (drop local paging/mode/input-buffer). User flashes **once** (their E2E); thereafter every display/interaction change is server-only.
-> 🚀 **Deploy (end of Day 3)** — a prompt AND a menu selection round-trip from any CLI; the firmware never needs another flash for UI changes.
+**📅 Day 3 — 2026-08-16 · Any instance, comfortably**
+10. ⬜ **mDNS multi-server + server picker.** Server advertises `_cardputerme._tcp` (bonjour-service); device discovers + local numbered server list → server-side session picker (`0. change server`). Fallback: built-in host.
+11. ⬜ **Zoom (server-owned font).** Display message gains `font`; device `setTextSize`; a ctrl-chord zooms; viewport dims derive from zoom.
+12. ⬜ **Processing status.** Prefer the tail row containing "esc to interrupt" (plain `.includes`) as status so Claude's live spinner/token line rides the marquee.
+13. ⬜ **History autosuggest + Tab accept.** While typing, ghost-render the newest history command matching the prefix (dim color); **Tab accepts** it (no suggestion → Tab passes to the terminal, server-decided). Avoids retyping repeated commands. Server-only, TDD.
+14. ⬜ **Terminal-fidelity pass (SSH-parity).** North star: Cardputer = ssh session, only difference is screen size. Audit against the REAL terminal side-by-side: (a) colors — device must show exactly the colors the terminal displays (extend `lib/ansi.js` coverage: bold/bright, 24-bit `38;2`, bg colors, reverse video); (b) layout — mirror the terminal's own structure (row order, spacing, input at bottom) rather than reshaping it. Verify with Claude Code AND at least one other CLI (e.g. plain bash + `ls --color`). Server-only, TDD.
+> 🚀 **Deploy (end of Day 3)** — two servers picked from the couch; zoom live; working-state always visible.
 
-## Done 2026-08-14 (agnostic pivot)
-- **#3 Named sessions (one server, many) + full-generic cleanup.** `server/lib/sessions.js` registry (name→adapter, UUID fallback) + `listTmuxSessions` auto-discovery; `server.js` routes reads/writes through the **selected** session (`activeTerminal`), with `listSessions`/`selectSession` over the WS and `/sessions`+`/select` HTTP. **Removed modes entirely** — deleted the Claude transcript machinery (`lib/transcript.js`, `readClaudeLatest`, discovery, `READ_MODE`, `fs.watch`): the bridge just mirrors the screen + detects prompts, for any CLI. User never names a session — all auto-discovered, picked on the device. TDD: `test/sessions.test.js` (7) + enumerator tests. **34/34 pass.** Verified: auto-discovered `claude/generic/rchat/tesseract`, `/select` switches live.
-- **#2 Terminal adapter (tmux first).** Extracted terminal I/O into `server/lib/terminal.js` (`exists`/`capture`/`cwd`/`sendText`/`sendKey`), tmux backend built from a session name with an injectable runner. `server.js` core makes **zero** direct tmux calls — all via `terminal.*`. TDD: `test/terminal.test.js` (7 contract tests with a fake runner). **30/30 pass.** Live server restarted on the adapter (session `generic`); control unaffected. PTY backend can now drop in unchanged.
-- **#1 Agnostic prompt detection — no hooks, no regex, no Claude coupling.** Added `server/lib/detect.js` (pure char-scan: ends-with-`?` + `N.`/`N)` option lists) and reworked `detectPrompt` to use it (always shows the question line). Removed ALL hook infra (`.claude/settings.json`, `bin/cardputerme-hook`, `/hook` route, `lib/hook.js`) and the `isQuestion` regex; default `READ_MODE=raw` mirrors any terminal, `claude` transcript-clean is opt-in; `detectPrompt` runs for every mode so any CLI's menu is caught. Core is regex-free.
+## Done 2026-08-14 (server-driven everything)
+- **#7 Thin firmware.** Renders the generic display (per-line server colors + status bar + **marquee ticker** for long status); forwards every raw key (uniform `<mod>+<arrow>` rule, one `arrowFor` table); zero content logic. Flashed + connected.
+- **#6 Server-rendered picker.** Numbered text menu (Telegram-style), digit selects, esc cancels — composed server-side.
+- **#5 Input engine (server-side FSM).** `lib/input.js` pure FSM + `applyKey`: server-owned compose buffer (echo line), esc=clear→picker, shift+esc=interrupt, Enter/Shift+Enter, Tab, digits answer prompts, **fn+↑/↓ drive TUI selectors** (viewport tracks the `>` pointer, recenters only on move), **opt+arrows always pan**, **Ctrl combos** (Ctrl+C…), **history recall** (ctrl+↑/↓, editable). Generic key names end-to-end; tmux spellings ONLY in the adapter. Typing/pan fast-path from cached grid.
+- **#4 Display protocol + terminal colors.** `{type:'display', body:[{text,color}], status}` screen-sized (~4KB); terminal's OWN ANSI colors mirrored to RGB565 (`lib/ansi.js`, no regex); bottom status bar = pane's last row. User-confirmed colors + status on device.
+- **Session exposure by name.** `cardputerme <name>` creates+exposes a session (`ensureSession`, adapter-side); zsh alias installed; launcher script backend-neutral. Auto-discovery + `/select`; 86/86 tests.
+- **#1–#3** (earlier): agnostic prompt detection · terminal adapter · named sessions/one server. See git log (`05be6b6`, `7f6ffc4`).
 
 ## Parked (post-focus — not now)
-PTY backend (drop-in via the Day-1 adapter, removes tmux entirely); command-history reuse UX; full README truth-pass; self-drive USB harness.
+PTY backend (drop-in via adapter; enables "expose ANY window" fully — run `cardputerme` inside a window to capture it); cursor-anchored prompt detection (tmux `#{cursor_y}` + styled-row); command snippets; session peek in picker; README truth-pass.
 
 ---
 ## Reference
-- **Server:** `node server.js` (or `./bin/cardputer-server`); ONE port `:4711` (`PORT`), ONE WebSocket for all sessions. Sessions **auto-discovered** — no session config needed; optional `SESSION=<name>` pre-selects one. Debug routes: `/health`, `/sessions`, `/select`, `/cards`, `/command`.
-- **Tests:** `cd server && node --test test/*.test.js` (34 pass). `npm test` wired.
-- **Firmware:** `PIO=~/.platformio/penv/bin/pio`; `$PIO run -t upload` (in `firmware/cardputer-claude/`). Device E2E is the user's.
-- **Detection rule:** choose-prompt = ends-with-`?` and/or ≥2 `N.`/`N)` options; always show the question. No hooks, no regex, no tokens.
-- **Method:** WIP=1; one 🟡 = one tasks.roblab.app started task. OpenTogg timer sync stopped for this project.
+- **Run:** `cardputerme [name]` (alias in ~/.zshrc) or `./bin/cardputer-server`; ONE port `:4711`, ONE WS. Device: `ws://192.168.0.149:4711/ws` (baked in firmware/.env).
+- **Tests:** `cd server && npm test` (86 pass). **Flash:** `cd firmware/cardputer-claude && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's).
+- **Keys:** chars type · Enter send · Shift+Enter newline · esc clear→picker · shift+esc interrupt · Tab · fn+arrows smart · opt+arrows pan · ctrl+letter control-key · ctrl+fn-↑/↓ history.
+- **Method:** WIP=1; one 🟡 = one started tasks.roblab.app task. Quiet work (no agent fan-out spam — user watches via the device).

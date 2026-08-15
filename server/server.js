@@ -407,6 +407,11 @@ setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`cardputerme — terminal remote on http://0.0.0.0:${PORT}  (ws://…/ws)`);
   console.log(`  cards  : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines | notify: ${NOTIFY ? 'on' : 'off'}`);
+  // `cardputerme <name>` EXPOSES a session by that name — create it if missing.
+  if (DEFAULT_SESSION) {
+    const created = await makeBackend(DEFAULT_SESSION).ensureSession();
+    if (!created) console.log(`  ! could not create session '${DEFAULT_SESSION}'`);
+  }
   await refreshSessions();
   console.log(`  sessions: ${registry.names().join(', ') || '(none yet)'} | active: ${activeSessionName || '(none)'}`);
 });

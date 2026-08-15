@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Start the Cardputer <-> Claude Code bridge server.
-# The server auto-discovers the newest Claude Code session, so just:
-#   1) start Claude in a tmux session:  tmux new -s claude ; claude
-#   2) run this script:                 ./bin/cardputer-server
+# cardputerme — expose this machine's terminal sessions to the Cardputer.
+#   cardputerme            (via the shell alias)  -> sessions auto-discovered
+#   cardputerme <name>                            -> expose a session by name
+# The Cardputer connects over WebSocket and drives whatever runs inside —
+# you never need to know (or care) how the session is hosted.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/server"

@@ -92,6 +92,21 @@ test('sendKey() translates generic named keys to tmux spellings, without -l', as
   }
 });
 
+test('ensureSession() creates a detached session when it does not exist', async () => {
+  const r = fakeRunner([{ code: 1 }, { code: 0 }]);           // has-session: no -> create
+  const t = tmuxBackend({ session: 'test', runner: r });
+  assert.equal(await t.ensureSession(), true);
+  assert.deepEqual(r.calls[0].args, ['has-session', '-t', 'test']);
+  assert.deepEqual(r.calls[1].args, ['new-session', '-d', '-s', 'test']);
+});
+
+test('ensureSession() is a no-op when the session already exists', async () => {
+  const r = fakeRunner([{ code: 0 }]);                        // has-session: yes
+  const t = tmuxBackend({ session: 'test', runner: r });
+  assert.equal(await t.ensureSession(), true);
+  assert.equal(r.calls.length, 1);                            // no create call
+});
+
 test('listTmuxSessions() lists session names, dropping blanks', async () => {
   const ok = fakeRunner([{ code: 0, stdout: 'claude\ngeneric\n\nrchat\n' }]);
   assert.deepEqual(await listTmuxSessions(ok), ['claude', 'generic', 'rchat']);
