@@ -221,8 +221,10 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 	return stateResult{lines: lines, status: "[" + s.cfg.Name + "] " + bar, sessionExists: true, awaiting: awaiting}
 }
 
-func (s *Server) buildState() stateResult {
-	pane, ok := s.backend.Capture()
+// stateFrom renders a captured pane into the device state. The caller holds mu;
+// the tmux Capture() itself is done OUTSIDE the lock (it's a read-only subprocess)
+// so a keystroke echo never waits on a capture in flight.
+func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
 		return stateResult{lines: s.screenLines(noSession), status: "terminal gone"}
 	}
@@ -257,8 +259,9 @@ func sig(st stateResult) string {
 }
 
 func (s *Server) pushIfChanged(force bool) {
+	pane, ok := s.backend.Capture() // read-only subprocess — kept OUT of the lock
 	s.mu.Lock()
-	st := s.buildState()
+	st := s.stateFrom(pane, ok)
 	sg := sig(st)
 	changed := sg != s.lastSig || force
 	if changed {
