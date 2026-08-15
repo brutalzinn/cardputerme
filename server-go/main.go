@@ -388,6 +388,37 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 // ---- UDP beacon (periodic announce is not polling) ---------------------------
 
+// broadcastTargets returns the subnet-directed broadcast address of every up
+// IPv4 interface, plus the limited broadcast as a fallback. The limited
+// 255.255.255.255 often has "no route to host" on macOS, so the directed
+// address (e.g. 192.168.0.255) is what actually reaches the LAN.
+func broadcastTargets() []*net.UDPAddr {
+	targets := []*net.UDPAddr{{IP: net.IPv4bcast, Port: beaconPort}}
+	ifaces, _ := net.Interfaces()
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip4 := ipn.IP.To4()
+			if ip4 == nil {
+				continue
+			}
+			b := make(net.IP, 4)
+			for i := 0; i < 4; i++ {
+				b[i] = ip4[i] | ^ipn.Mask[i]
+			}
+			targets = append(targets, &net.UDPAddr{IP: b, Port: beaconPort})
+		}
+	}
+	return targets
+}
+
 func startBeacon(port int) {
 	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
 		var serr error
@@ -401,15 +432,16 @@ func startBeacon(port int) {
 		log.Printf("beacon disabled: %v", err)
 		return
 	}
-	dst, _ := net.ResolveUDPAddr("udp4", beaconAddr+":"+strconv.Itoa(beaconPort))
 	msg := []byte(beaconMessage(name, port))
 	go func() {
 		t := time.NewTicker(beaconIntervalMs * time.Millisecond)
 		for range t.C {
-			pc.WriteTo(msg, dst)
+			for _, dst := range broadcastTargets() {
+				pc.WriteTo(msg, dst)
+			}
 		}
 	}()
-	log.Printf("  beacon : udp %s:%d every %dms", beaconAddr, beaconPort, beaconIntervalMs)
+	log.Printf("  beacon : udp :%d every %dms (subnet-directed + limited broadcast)", beaconPort, beaconIntervalMs)
 }
 
 func main() {
