@@ -1,0 +1,13 @@
+{
+  "name": "cardputerme",
+  "displayName": "cardputerme",
+  "description": "Expose your current Claude Code session to an M5Cardputer over Wi-Fi — watch and drive Claude from the pocket device. Ships a /cardputer command that runs the cardputerme CLI on this tmux session.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Roberto Paes"
+  },
+  "homepage": "https://github.com/brutalzinn/cardputerme",
+  "repository": "https://github.com/brutalzinn/cardputerme",
+  "license": "MIT",
+  "keywords": ["cardputer", "m5stack", "terminal", "remote", "claude-code", "esp32"]
+}

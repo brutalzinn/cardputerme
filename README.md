@@ -110,6 +110,25 @@ Now your desk screen **and** the Cardputer mirror the same live session — type
 
 > You never *need* tmux for basic use — `cardputerme` manages the session for you and the Cardputer never shows it. Attaching is only for the dual-drive "desk + pocket" workflow above.
 
+### The `/cardputer` skill (expose without leaving Claude Code)
+
+This repo ships a **Claude Code plugin** with a `/cardputer` skill — run it inside any Claude Code session (that's in tmux) and it exposes *that* session to the device for you.
+
+Install as a plugin:
+
+```
+/plugin marketplace add brutalzinn/cardputerme
+/plugin install cardputerme@cardputerme
+```
+
+Or symlink the skill straight from your clone into your Claude config (works across accounts):
+
+```
+ln -sfn "$PWD/skills/cardputer" ~/.claude/skills/cardputer
+```
+
+Then in Claude Code: **`/cardputer`** → pick the exposure on the device → you're driving Claude from your pocket.
+
 ---
 
 ## Layout

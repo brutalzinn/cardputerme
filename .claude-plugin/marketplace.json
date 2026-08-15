@@ -1,0 +1,18 @@
+{
+  "name": "cardputerme",
+  "owner": {
+    "name": "brutalzinn",
+    "url": "https://github.com/brutalzinn"
+  },
+  "description": "Marketplace for the cardputerme Claude Code plugin — expose your Claude Code session to an M5Cardputer.",
+  "version": "1.0",
+  "plugins": [
+    {
+      "name": "cardputerme",
+      "source": "./",
+      "description": "Ships the /cardputer skill: expose the current Claude Code session to an M5Cardputer and drive it from the device.",
+      "category": "productivity",
+      "keywords": ["cardputer", "terminal", "remote", "claude-code"]
+    }
+  ]
+}
