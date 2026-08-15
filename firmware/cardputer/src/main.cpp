@@ -1,24 +1,3 @@
-/*
- * cardputerme — thin frontend for the generic terminal remote
- * -------------------------------------------------------------------
- * A PURE renderer: it draws the screen the server sends (a generic "display"
- * message = body lines each with their own color + a bottom status bar) and
- * forwards keys. It holds NO content logic — colors, status, menus and meaning
- * are all decided by the server. So new screens/colors need a server change, not
- * a re-flash.
- *
- * Board:   M5Stack Cardputer ADV (StampS3A / ESP32-S3FN8), 240x135 ST7789V2.
- * Library: M5Cardputer (auto-detects Cardputer vs ADV via M5Unified).
- *
- * UI
- *   VIEW mode (default): shows one page of the session screen.
- *     ;  -> previous page        .  -> next page
- *     any letter/key -> start typing a command
- *   INPUT mode: type; Enter sends it over the socket. (del = backspace)
- *   The `esc` key sends `; the SERVER interprets it (` = Esc, `` = picker).
- * -------------------------------------------------------------------
- */
-
 #include <M5Cardputer.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -26,8 +5,6 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-// ===================================================================
-// All settings come from firmware/.env (injected as -DENV_* at build).
 #ifndef ENV_WIFI_SSID
 #define ENV_WIFI_SSID "YOUR_WIFI_SSID"
 #endif
@@ -44,28 +21,22 @@ const char* WS_PATH   = "/ws";
 const int   WRAP_COLS = ENV_WRAP_COLS;
 const int   BEACON_PORT = 8000;
 const unsigned long BEACON_TTL_MS = 6500;
-// ===================================================================
 
-// Screen geometry (Cardputer ADV = 240x135)
 #define SCR_W       240
 #define SCR_H       135
-#define HEADER_H    14        // top status bar height
-#define STATUS_H    16        // bottom status bar height
-#define LINE_H      16        // size-2 font line height (12x16 px glyphs)
-#define SBAR_W      3         // right-edge scroll indicator width
+#define HEADER_H    14
+#define STATUS_H    16
+#define LINE_H      16
+#define SBAR_W      3
 
-// Chrome colors (RGB565) the firmware owns. BODY colors come FROM THE SERVER,
-// per line — the device never decides content color.
-#define COL_BG      0x0000    // black
-#define COL_HDR     0x10A2    // dark slate bars
-#define COL_TEXT    0xFFFF    // white (fallback only)
-#define COL_ACCENT  0x07FF    // cyan
-#define COL_DIM     0x8410    // grey — hints / scrollbar track
-#define COL_OK      0x07E6    // green — wifi ok / toast
-#define COL_WARN    0xFD20    // orange — no wifi / errors
+#define COL_BG      0x0000
+#define COL_HDR     0x10A2
+#define COL_TEXT    0xFFFF
+#define COL_ACCENT  0x07FF
+#define COL_DIM     0x8410
+#define COL_OK      0x07E6
+#define COL_WARN    0xFD20
 
-
-// The server sends body lines (each with its own color) + a status string.
 struct Line { String text; uint16_t color; };
 std::vector<Line> g_lines;
 String   g_status = "";
@@ -73,17 +44,24 @@ uint16_t g_statusColor = COL_ACCENT;
 bool     g_sessionExists = false;
 int      g_page = 0;
 
-// follow=true keeps us on the newest page as output grows. Paging up turns it
-// off; paging back to the last page turns it on again.
 bool follow = true;
 
 WebSocketsClient webSocket;
 bool wsConnected = false;
 
+WiFiUDP g_udp;
+struct Found { IPAddress ip; uint16_t port; String name; unsigned long seen; };
+std::vector<Found> g_found;
+bool g_haveTarget = false;
+bool g_autoConnect = true;
+IPAddress g_targetIp;
+uint16_t g_targetPort = 0;
+String g_targetName = "";
+bool g_listDirty = false;
+
 String toast = "";
 unsigned long toastUntil = 0;
 
-// ------------------------------------------------------------------ helpers
 void showToast(const String& msg, uint16_t ms = 1200) {
   toast = msg;
   toastUntil = millis() + ms;
@@ -120,8 +98,6 @@ void connectWifi() {
   M5Cardputer.Display.fillScreen(COL_BG);
 }
 
-// ------------------------------------------------------------------ drawing
-// Top bar: [wifi][mode] .......... [toast]  [page i/total]
 void drawHeader() {
   auto& d = M5Cardputer.Display;
   d.fillRect(0, 0, SCR_W, HEADER_H, COL_HDR);
@@ -149,7 +125,6 @@ void drawHeader() {
   d.print(" " + pos);
 }
 
-// Right-edge scroll indicator: which page within the whole screen.
 void drawScrollbar() {
   auto& d = M5Cardputer.Display;
   int total = pageCount();
@@ -162,7 +137,6 @@ void drawScrollbar() {
   d.fillRect(SCR_W - SBAR_W, y, SBAR_W, thumbH, COL_ACCENT);
 }
 
-// Body: the current page of server-colored lines.
 void drawBody() {
   auto& d = M5Cardputer.Display;
   int bb = bodyBottom();
@@ -182,7 +156,7 @@ void drawBody() {
   int y = HEADER_H + 2;
   for (int i = start; i < start + lpp && i < (int)g_lines.size(); i++) {
     if (y + LINE_H > bb) break;
-    d.setTextColor(g_lines[i].color, COL_BG);   // color chosen by the SERVER
+    d.setTextColor(g_lines[i].color, COL_BG);
     d.setCursor(3, y);
     d.print(g_lines[i].text);
     y += LINE_H;
@@ -190,9 +164,6 @@ void drawBody() {
   drawScrollbar();
 }
 
-// Bottom status bar (always shown) — server-composed text. Long text MARQUEES
-// (slides left in a loop) so the full line — e.g. token usage — stays readable
-// without any scrolling. Pure presentation; the server owns the content.
 int g_statusOffset = 0;
 unsigned long g_statusTick = 0;
 
@@ -203,10 +174,10 @@ void drawStatusBar() {
   d.setTextSize(1);
   d.setTextColor(g_statusColor, COL_HDR);
   d.setCursor(3, y0 + 4);
-  const int maxChars = 39;                 // ~6px/char at size 1 across 240px
+  const int maxChars = 39;
   String s = g_status;
   if ((int)s.length() <= maxChars) { d.print(s); return; }
-  // Marquee window: wrap around with a gap so the start is easy to spot.
+
   String loop = s + "   ";
   int n = loop.length();
   int off = g_statusOffset % n;
@@ -216,26 +187,123 @@ void drawStatusBar() {
   d.print(win);
 }
 
-// Advance the marquee a step at a time (called from loop()).
 void tickStatusMarquee() {
   const int maxChars = 39;
   if ((int)g_status.length() <= maxChars) return;
   unsigned long now = millis();
-  if (now - g_statusTick < 300) return;    // ~3 chars/second
+  if (now - g_statusTick < 300) return;
   g_statusTick = now;
   g_statusOffset++;
   drawStatusBar();
 }
 
-// No local input UI: the SERVER owns the compose buffer and renders it into the
-// display message (lazy device — display things only).
 void redraw() {
   drawHeader();
   drawBody();
   drawStatusBar();
 }
 
-// ------------------------------------------------------------------ network
+int foundIndex(const IPAddress& ip, uint16_t port) {
+  for (size_t i = 0; i < g_found.size(); i++) {
+    if (g_found[i].ip == ip && g_found[i].port == port) return (int)i;
+  }
+  return -1;
+}
+
+void drawServerList() {
+  auto& d = M5Cardputer.Display;
+  d.fillScreen(COL_BG);
+  drawHeader();
+  d.setTextSize(2);
+  d.setTextColor(COL_ACCENT, COL_BG);
+  d.setCursor(3, HEADER_H + 4);
+  d.print("cardputerme");
+  d.setTextSize(1);
+  if (g_found.empty()) {
+    d.setTextColor(COL_DIM, COL_BG);
+    d.setCursor(3, HEADER_H + 28);
+    d.print("Listening for terminals...");
+    d.setCursor(3, HEADER_H + 40);
+    d.print("On the computer: cardputerme");
+    return;
+  }
+  int y = HEADER_H + 26;
+  for (size_t i = 0; i < g_found.size() && i < 9; i++) {
+    if (y + 22 > bodyBottom()) break;
+    d.setTextColor(COL_TEXT, COL_BG);
+    d.setCursor(3, y);
+    d.print(String((int)i + 1) + ". " + g_found[i].name);
+    d.setTextColor(COL_DIM, COL_BG);
+    d.setCursor(15, y + 10);
+    d.print(g_found[i].ip.toString() + ":" + String(g_found[i].port));
+    y += 24;
+  }
+}
+
+void connectToFound(int idx) {
+  if (idx < 0 || idx >= (int)g_found.size()) return;
+  g_targetIp = g_found[idx].ip;
+  g_targetPort = g_found[idx].port;
+  g_targetName = g_found[idx].name;
+  g_haveTarget = true;
+  g_lines.clear();
+  g_status = "";
+  webSocket.disconnect();
+  webSocket.begin(g_targetIp.toString(), g_targetPort, WS_PATH);
+  showToast(g_targetName);
+  M5Cardputer.Display.fillScreen(COL_BG);
+  redraw();
+}
+
+void leaveServer() {
+  g_haveTarget = false;
+  g_autoConnect = false;
+  wsConnected = false;
+  webSocket.disconnect();
+  g_lines.clear();
+  g_status = "";
+  drawServerList();
+}
+
+void pollBeacons() {
+  int size = g_udp.parsePacket();
+  while (size > 0) {
+    char buf[256];
+    int len = g_udp.read(buf, 255);
+    if (len > 0) {
+      buf[len] = 0;
+      JsonDocument doc;
+      bool ok = deserializeJson(doc, buf, len) == DeserializationError::Ok;
+      if (ok && strcmp(doc["app"] | "", "cardputerme") == 0) {
+        IPAddress ip = g_udp.remoteIP();
+        uint16_t port = (uint16_t)(doc["port"] | 0);
+        String name = String((const char*)(doc["name"] | ""));
+        if (port > 0) {
+          int idx = foundIndex(ip, port);
+          if (idx < 0) {
+            Found f; f.ip = ip; f.port = port; f.name = name; f.seen = millis();
+            g_found.push_back(f);
+            g_listDirty = true;
+          }
+          if (idx >= 0) {
+            g_found[idx].seen = millis();
+            if (g_found[idx].name != name) { g_found[idx].name = name; g_listDirty = true; }
+          }
+        }
+      }
+    }
+    size = g_udp.parsePacket();
+  }
+}
+
+void expireFound() {
+  for (int i = (int)g_found.size() - 1; i >= 0; i--) {
+    if (millis() - g_found[i].seen <= BEACON_TTL_MS) continue;
+    g_found.erase(g_found.begin() + i);
+    g_listDirty = true;
+  }
+}
+
 void beep(bool question) {
   if (question) {
     M5Cardputer.Speaker.tone(1200, 90);
@@ -246,13 +314,11 @@ void beep(bool question) {
   M5Cardputer.Speaker.tone(1600, 70);
 }
 
-// Render a pushed {type:"display"} message: body lines (each with a color) + a
-// status bar. follow=true keeps us on the newest page.
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
   JsonObject status = doc["status"];
   String newStatus = String((const char*)(status["text"] | ""));
-  if (newStatus != g_status) g_statusOffset = 0;   // new text -> marquee restarts
+  if (newStatus != g_status) g_statusOffset = 0;
   g_status = newStatus;
   g_statusColor = (uint16_t)((uint32_t)(status["color"] | (uint32_t)COL_ACCENT));
 
@@ -271,8 +337,6 @@ void applyDisplay(JsonDocument& doc) {
   redraw();
 }
 
-// Persistent WebSocket: server pushes {type:"display"|"notify"|"sessions"};
-// device sends {type:"cmd"}. The server decides everything shown.
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
@@ -282,6 +346,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
     case WStype_DISCONNECTED:
       wsConnected = false;
+      if (!g_haveTarget) break;
       showToast("Reconnecting");
       redraw();
       break;
@@ -297,7 +362,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
         drawHeader();
         return;
       }
-      // {type:"sessions"} — the picker is rendered server-side as a display; ignore.
+
       return;
     }
     default:
@@ -305,8 +370,6 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
-// Forward a NAMED key (arrows, etc.) for the SERVER to interpret — e.g. panning
-// the viewport. The device decides nothing; it just reports the key.
 void sendKey(const char* key) {
   if (!wsConnected) return;
   JsonDocument doc;
@@ -317,14 +380,6 @@ void sendKey(const char* key) {
   webSocket.sendTXT(body);
 }
 
-// ------------------------------------------------------------------ input
-// LAZY DEVICE: every keypress is forwarded raw; the SERVER owns the input
-// buffer, esc behaviour, menus — everything. The device decides nothing.
-// ONE arrow table + ONE uniform modifier rule:
-//   the ; . , / cluster is "up/down/left/right" under ANY modifier (fn / opt /
-//   ctrl), sent as "<mod>+<arrow>" (bare fn = the arrow itself);
-//   ctrl+<other char> -> "ctrl+<char>"; shift+esc -> "shift+esc";
-//   `esc` (`) -> "esc"; enter/shift+enter/del/tab -> named; chars -> themselves.
 const char* arrowFor(char c) {
   if (c == ';') return "up";
   if (c == '.') return "down";
@@ -335,6 +390,11 @@ const char* arrowFor(char c) {
 
 void handleKeys(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
+    if (st.fn && (c == '`' || c == '~')) { leaveServer(); return; }
+    if (!g_haveTarget) {
+      if (c >= '1' && c <= '9') connectToFound(c - '1');
+      continue;
+    }
     const char* arrow = arrowFor(c);
     if (arrow && st.fn) { sendKey(arrow); continue; }
     if (arrow && st.opt) { sendKey((String("opt+") + arrow).c_str()); continue; }
@@ -344,43 +404,51 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
       sendKey(combo);
       continue;
     }
-    // shift+esc -> stop the agent (shifted backtick may arrive as '~')
+
     if (st.shift && (c == '`' || c == '~')) { sendKey("shift+esc"); continue; }
     if (c == '`') { sendKey("esc"); continue; }
     char one[2] = { c, 0 };
     sendKey(one);
   }
+  if (!g_haveTarget) return;
   if (st.del) sendKey("backspace");
   if (st.tab) sendKey("tab");
   if (st.enter && st.shift) sendKey("shift+enter");
   if (st.enter && !st.shift) sendKey("enter");
 }
 
-// ------------------------------------------------------------------ Arduino
 void setup() {
   auto cfg = M5.config();
-  M5Cardputer.begin(cfg, true);           // true = enable keyboard
-  M5Cardputer.Display.setRotation(1);     // landscape 240x135
+  M5Cardputer.begin(cfg, true);
+  M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
   M5Cardputer.Speaker.setVolume(140);
   M5Cardputer.Display.fillScreen(COL_BG);
 
   connectWifi();
 
-  webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
+  g_udp.begin(BEACON_PORT);
   webSocket.onEvent(onWsEvent);
   webSocket.setReconnectInterval(3000);
-  showToast("Linking...");
-  redraw();
+  drawServerList();
 }
 
 void loop() {
   M5Cardputer.update();
-  webSocket.loop();
+  if (g_haveTarget) webSocket.loop();
+
+  pollBeacons();
+  expireFound();
+  if (!g_haveTarget) {
+    if (g_autoConnect && g_found.size() == 1) connectToFound(0);
+    if (!g_haveTarget && g_listDirty) { g_listDirty = false; drawServerList(); }
+  }
+  if (g_haveTarget && g_listDirty) g_listDirty = false;
+  if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
 
   if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
-    handleKeys(st);                       // forward everything; server decides
+    handleKeys(st);
   }
 
   static bool toastWasShown = false;
@@ -394,7 +462,8 @@ void loop() {
     drawHeader();
   }
 
-  tickStatusMarquee();                     // slide long status text (token usage etc.)
+  tickStatusMarquee();
 
   delay(5);
 }
+
