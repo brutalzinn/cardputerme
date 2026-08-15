@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # cardputerme — expose this machine's terminal sessions to the Cardputer.
-#   cardputerme            (via the shell alias)  -> sessions auto-discovered
-#   cardputerme <name>                            -> expose a session by name
-# The Cardputer connects over WebSocket and drives whatever runs inside —
-# you never need to know (or care) how the session is hosted.
+#   cd ~/proj && cardputerme   -> session named after the dir, started IN the dir
+#   cardputerme <name>         -> expose a session by that name
+# If the server is already running, the session is just created and picked up by
+# auto-discovery — never a second server on the port.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAME="${1:-${SESSION:-$(basename "$PWD")}}"
+PORT="${PORT:-4711}"
+tmux has-session -t "=$NAME" 2>/dev/null || tmux new-session -d -s "$NAME" -c "$PWD"
+if curl -sf -m 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  echo "cardputerme — server already on :$PORT | session '$NAME' ready -> tmux attach -t $NAME"
+  exit 0
+fi
 cd "$ROOT/server"
 [ -d node_modules ] || npm install --no-audit --no-fund
-exec node server.js
+SESSION="$NAME" exec node server.js

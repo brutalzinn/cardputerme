@@ -56,3 +56,19 @@ test('get() returns null for an unknown session', () => {
   const r = createRegistry();
   assert.equal(r.get('nope'), null);
 });
+
+test('prune() drops entries not in the live list and returns the removed names', () => {
+  const r = createRegistry();
+  r.add('alive', fakeBackend('a'));
+  r.add('dead', fakeBackend('d'));
+  r.add('gone', fakeBackend('g'));
+  assert.deepEqual(r.prune(['alive']), ['dead', 'gone']);
+  assert.deepEqual(r.names(), ['alive']);
+});
+
+test('prune() with everything live removes nothing', () => {
+  const r = createRegistry();
+  r.add('a', fakeBackend('a'));
+  assert.deepEqual(r.prune(['a']), []);
+  assert.deepEqual(r.names(), ['a']);
+});

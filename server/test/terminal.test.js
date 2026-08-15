@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { tmuxBackend, listTmuxSessions } = require('../lib/terminal');
+const { tmuxBackend, listTmuxSessions, listTmuxSessionsInfo, killTmuxSession } = require('../lib/terminal');
 
 // A fake runner records the (cmd, args) issued and returns canned results in
 // order, so we test the adapter CONTRACT without touching real tmux. This is
@@ -116,4 +116,29 @@ test('listTmuxSessions() lists session names, dropping blanks', async () => {
 test('listTmuxSessions() returns [] when tmux has no server / errors', async () => {
   const fail = fakeRunner([{ code: 1, stdout: 'no server running' }]);
   assert.deepEqual(await listTmuxSessions(fail), []);
+});
+
+test('listTmuxSessionsInfo() parses name, activity, attached and pane command', async () => {
+  const ok = fakeRunner([{ code: 0, stdout: 'claude\t1755200000\t1\tnode\nold\t1755100000\t0\tzsh\n\n' }]);
+  assert.deepEqual(await listTmuxSessionsInfo(ok), [
+    { name: 'claude', activity: 1755200000, attached: 1, command: 'node' },
+    { name: 'old', activity: 1755100000, attached: 0, command: 'zsh' },
+  ]);
+  assert.deepEqual(ok.calls[0].args, [
+    'list-sessions', '-F', '#{session_name}\t#{session_activity}\t#{session_attached}\t#{pane_current_command}',
+  ]);
+});
+
+test('listTmuxSessionsInfo() returns [] when tmux has no server / errors', async () => {
+  const fail = fakeRunner([{ code: 1, stdout: 'no server running' }]);
+  assert.deepEqual(await listTmuxSessionsInfo(fail), []);
+});
+
+test('killTmuxSession() kills by EXACT name (=) so prefixes never match another session', async () => {
+  const ok = fakeRunner([{ code: 0 }]);
+  assert.equal(await killTmuxSession('old', ok), true);
+  assert.deepEqual(ok.calls[0], { cmd: 'tmux', args: ['kill-session', '-t', '=old'] });
+
+  const fail = fakeRunner([{ code: 1 }]);
+  assert.equal(await killTmuxSession('old', fail), false);
 });

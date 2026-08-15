@@ -23,8 +23,9 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const { sliceIntoCards, toAscii, wrapLine } = require('./lib/format');
 const { parseChoices, endsWithQuestion, trimEnd } = require('./lib/detect');
-const { tmuxBackend, listTmuxSessions } = require('./lib/terminal');
+const { tmuxBackend, listTmuxSessions, listTmuxSessionsInfo, killTmuxSession } = require('./lib/terminal');
 const { createRegistry } = require('./lib/sessions');
+const { sessionsToClear } = require('./lib/idle');
 const { buildDisplay, COLORS } = require('./lib/display');
 const { interpretKey } = require('./lib/input');
 const { parseLine, stripAnsi } = require('./lib/ansi');
@@ -57,6 +58,7 @@ const LINES_PER_CARD = parseInt(process.env.LINES_PER_CARD || '7', 10);
 const SCROLLBACK_LINES = parseInt(process.env.SCROLLBACK_LINES || '200', 10);
 const MAX_CARDS = parseInt(process.env.MAX_CARDS || '40', 10);
 const NOTIFY = (process.env.NOTIFY || '1') !== '0';
+const IDLE_MINUTES = parseInt(process.env.IDLE_MINUTES || '30', 10);
 
 // ---- session registry (one server, many named sessions) --------------------
 // The core reads/writes through the SELECTED session's adapter, never a single
@@ -94,6 +96,7 @@ function clamp(v, lo, hi) {
 // found here and picked on the device. Cheap; safe to call often.
 async function refreshSessions() {
   const live = await listTmuxSessions();
+  registry.prune(live);
   for (const name of live) {
     if (registry.has(name)) continue;
     registry.add(name, makeBackend(name));
@@ -394,6 +397,19 @@ wss.on('connection', async (ws, req) => {
     }
   });
 });
+
+async function sweepIdleSessions() {
+  const infos = await listTmuxSessionsInfo();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const idle = sessionsToClear(infos, { nowSec, timeoutSec: IDLE_MINUTES * 60, active: activeSessionName });
+  if (idle.length === 0) return;
+  for (const name of idle) await killTmuxSession(name);
+  console.log(`[idle] cleared: ${idle.join(', ')}`);
+  await refreshSessions();
+  broadcast(sessionsMessage());
+  pushIfChanged(true).catch(() => {});
+}
+if (IDLE_MINUTES > 0) setInterval(() => { sweepIdleSessions().catch(() => {}); }, 60000);
 
 // Server-side tick (NOT device polling): catches screen changes that emit no
 // event — prompts, menus, live streaming. The Cardputer just receives pushes.

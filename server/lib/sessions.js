@@ -40,7 +40,18 @@ function createRegistry({ newId = () => crypto.randomUUID() } = {}) {
     return Array.from(byName.keys());
   }
 
-  return { add, has, get, remove, list, names };
+  function prune(liveNames) {
+    const keep = new Set(liveNames);
+    const removed = [];
+    for (const name of byName.keys()) {
+      if (keep.has(name)) continue;
+      removed.push(name);
+    }
+    for (const name of removed) byName.delete(name);
+    return removed;
+  }
+
+  return { add, has, get, remove, list, names, prune };
 }
 
 module.exports = { createRegistry };
