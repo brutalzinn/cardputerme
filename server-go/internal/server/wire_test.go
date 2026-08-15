@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -13,8 +13,7 @@ import (
 )
 
 // End-to-end wire test: a real tmux session behind the real WS handler, driven
-// by a gorilla client — the same contract the firmware relies on. Skips when
-// tmux is unavailable so `go test` stays portable.
+// by a gorilla client — the contract the firmware relies on. Skips without tmux.
 func TestWireEndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
@@ -26,15 +25,11 @@ func TestWireEndToEnd(t *testing.T) {
 	}
 	defer exec.Command("tmux", "kill-session", "-t", sess).Run()
 
-	name = sess
-	backend = createBackend(sess, 200)
-	session = &Session{view: View{Follow: true, SelRow: -1}, hist: -1}
-	hub = &Hub{conns: map[*websocket.Conn]bool{}}
-
-	srv := httptest.NewServer(http.HandlerFunc(wsHandler))
+	s := New(Config{Name: sess, WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true})
+	srv := httptest.NewServer(http.HandlerFunc(s.wsHandler))
 	defer srv.Close()
 
-	stop := backend.Subscribe(func() { schedulePush() }, func() {})
+	stop := s.backend.Subscribe(s.schedulePush, func() {})
 	defer stop()
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
@@ -44,11 +39,9 @@ func TestWireEndToEnd(t *testing.T) {
 	}
 	defer c.Close()
 
-	// initial frame
 	if _, _, err := c.ReadMessage(); err != nil {
 		t.Fatalf("initial read: %v", err)
 	}
-
 	if err := c.WriteJSON(map[string]string{"type": "cmd", "text": "echo wiretestmarker"}); err != nil {
 		t.Fatalf("write: %v", err)
 	}

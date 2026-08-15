@@ -1,4 +1,4 @@
-package main
+package screen
 
 import (
 	"strconv"
@@ -10,12 +10,7 @@ type Choice struct {
 	Label string
 }
 
-func endsWithQuestion(text string) bool {
-	t := strings.TrimRight(text, " \n\t\r")
-	return len(t) > 0 && t[len(t)-1] == '?'
-}
-
-func parseChoices(text string) []Choice {
+func ParseChoices(text string) []Choice {
 	out := []Choice{}
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)

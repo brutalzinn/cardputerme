@@ -1,6 +1,14 @@
-package main
+package server
 
-import "testing"
+import (
+	"testing"
+
+	"cardputerme/internal/screen"
+)
+
+func testServer() *Server {
+	return New(Config{Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true})
+}
 
 func TestDetectPromptAwaiting(t *testing.T) {
 	if !detectPromptAwaiting("Proceed?\n1. Yes\n2. No") {
@@ -18,26 +26,27 @@ func TestDetectPromptAwaiting(t *testing.T) {
 }
 
 func TestFindSelectorRow(t *testing.T) {
-	grid := []Line{
-		{Text: "some output", Color: 0},
-		{Text: "  1. Alpha", Color: 0},
-		{Text: "> 2. Beta", Color: 0},
+	grid := []screen.Line{
+		{Text: "some output"},
+		{Text: "  1. Alpha"},
+		{Text: "> 2. Beta"},
 	}
 	if got := findSelectorRow(grid); got != 2 {
 		t.Fatalf("got %d", got)
 	}
-	if got := findSelectorRow([]Line{{Text: "no pointer", Color: 0}}); got != -1 {
+	if got := findSelectorRow([]screen.Line{{Text: "no pointer"}}); got != -1 {
 		t.Fatalf("want -1 got %d", got)
 	}
 }
 
 func TestGridLines(t *testing.T) {
+	esc := "\x1b"
 	rows := []string{esc + "[38;2;255;0;0mred line", "plain\ttab"}
 	g := gridLines(rows)
 	if len(g) != 2 {
 		t.Fatalf("len %d", len(g))
 	}
-	if g[0].Text != "red line" || g[0].Color != rgb565(255, 0, 0) {
+	if g[0].Text != "red line" || g[0].Color != screen.RGB565(255, 0, 0) {
 		t.Fatalf("row0 %+v", g[0])
 	}
 	if g[1].Text != "plain  tab" {
@@ -46,8 +55,7 @@ func TestGridLines(t *testing.T) {
 }
 
 func TestSplitScreen(t *testing.T) {
-	pane := "line one\nline two\n\n"
-	grid, status := splitScreen(pane)
+	grid, status := splitScreen("line one\nline two\n\n")
 	if status != "line two" {
 		t.Fatalf("status %q", status)
 	}
@@ -57,8 +65,7 @@ func TestSplitScreen(t *testing.T) {
 }
 
 func TestSplitScreenPrefersInterruptRow(t *testing.T) {
-	pane := "building the thing\n✳ Baking… (esc to interrupt)\n$ "
-	_, status := splitScreen(pane)
+	_, status := splitScreen("building the thing\n✳ Baking… (esc to interrupt)\n$ ")
 	if status != "Baking... (esc to interrupt)" {
 		t.Fatalf("status %q", status)
 	}
@@ -72,10 +79,10 @@ func TestSplitScreenFallsBackToLastRow(t *testing.T) {
 }
 
 func TestComposeMirrorFollowsBottom(t *testing.T) {
-	s := &Session{view: View{Follow: true, SelRow: -1}, hist: -1}
-	grid := []Line{}
+	s := testServer()
+	grid := []screen.Line{}
 	for i := range 10 {
-		grid = append(grid, Line{Text: "l" + string(rune('0'+i)), Color: colors.Text})
+		grid = append(grid, screen.Line{Text: "l" + string(rune('0'+i)), Color: screen.Colors.Text})
 	}
 	st := s.composeMirror(grid, "status", false)
 	if len(st.lines) != viewRows {
@@ -90,19 +97,22 @@ func TestComposeMirrorFollowsBottom(t *testing.T) {
 }
 
 func TestComposeMirrorShowsInputBuffer(t *testing.T) {
-	s := &Session{view: View{Follow: true, SelRow: -1}, hist: -1, input: "git status"}
-	st := s.composeMirror([]Line{{Text: "prev", Color: colors.Text}}, "", false)
+	s := testServer()
+	s.input = "git status"
+	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", false)
 	last := st.lines[len(st.lines)-1]
-	if last.Text != "> git status" || last.Color != colors.Prompt {
+	if last.Text != "> git status" || last.Color != screen.Colors.Prompt {
 		t.Fatalf("input line %+v", last)
 	}
 }
 
 func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
-	s := &Session{view: View{Follow: true, SelRow: -1}, hist: -1, input: "git c", history: []string{"git commit"}}
-	st := s.composeMirror([]Line{{Text: "prev", Color: colors.Text}}, "", false)
+	s := testServer()
+	s.input = "git c"
+	s.history = []string{"git commit"}
+	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", false)
 	last := st.lines[len(st.lines)-1]
-	if last.Text != "git commit" || last.Color != colors.Dim {
+	if last.Text != "git commit" || last.Color != screen.Colors.Dim {
 		t.Fatalf("ghost line %+v", last)
 	}
 }

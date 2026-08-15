@@ -1,4 +1,4 @@
-package main
+package terminal
 
 import (
 	"os"
@@ -38,7 +38,7 @@ type Backend struct {
 	typeDelay       time.Duration
 }
 
-func createBackend(session string, scrollbackLines int) *Backend {
+func CreateBackend(session string, scrollbackLines int) *Backend {
 	return &Backend{session: session, scrollbackLines: scrollbackLines, typeDelay: 120 * time.Millisecond}
 }
 

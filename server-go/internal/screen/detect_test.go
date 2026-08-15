@@ -1,18 +1,6 @@
-package main
+package screen
 
 import "testing"
-
-func TestEndsWithQuestion(t *testing.T) {
-	if !endsWithQuestion("Do you want to proceed?") {
-		t.Fatal("q")
-	}
-	if !endsWithQuestion("Proceed?  \n\t") {
-		t.Fatal("trailing ws")
-	}
-	if endsWithQuestion("All done.") || endsWithQuestion("a? and more") || endsWithQuestion("") {
-		t.Fatal("false cases")
-	}
-}
 
 func choicesEq(a []Choice, b []Choice) bool {
 	if len(a) != len(b) {
@@ -27,7 +15,7 @@ func choicesEq(a []Choice, b []Choice) bool {
 }
 
 func TestParseChoicesDot(t *testing.T) {
-	got := parseChoices("Pick one:\n1. Yes\n2. No, keep it")
+	got := ParseChoices("Pick one:\n1. Yes\n2. No, keep it")
 	want := []Choice{{1, "Yes"}, {2, "No, keep it"}}
 	if !choicesEq(got, want) {
 		t.Fatalf("got %+v", got)
@@ -35,7 +23,7 @@ func TestParseChoicesDot(t *testing.T) {
 }
 
 func TestParseChoicesParenIndent(t *testing.T) {
-	got := parseChoices("  1) Alpha\n  2) Beta")
+	got := ParseChoices("  1) Alpha\n  2) Beta")
 	want := []Choice{{1, "Alpha"}, {2, "Beta"}}
 	if !choicesEq(got, want) {
 		t.Fatalf("got %+v", got)
@@ -43,7 +31,7 @@ func TestParseChoicesParenIndent(t *testing.T) {
 }
 
 func TestParseChoicesIgnoresNonOptions(t *testing.T) {
-	if got := parseChoices("3.14 is pi\nno number here\n1.no space"); len(got) != 0 {
+	if got := ParseChoices("3.14 is pi\nno number here\n1.no space"); len(got) != 0 {
 		t.Fatalf("got %+v", got)
 	}
 }

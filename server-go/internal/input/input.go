@@ -1,4 +1,4 @@
-package main
+package input
 
 import "strings"
 
@@ -39,7 +39,7 @@ var arrows = map[string]bool{"up": true, "down": true, "left": true, "right": tr
 
 // suggest returns the newest history entry that extends the current input, or
 // "" when there is none — the basis for autosuggest + Tab-accept.
-func suggest(input string, history []string) string {
+func Suggest(input string, history []string) string {
 	if input == "" {
 		return ""
 	}
@@ -59,7 +59,7 @@ func splitMod(k string) (mod, base string) {
 	return k[:i], k[i+1:]
 }
 
-func interpretKey(state State, key string, ctx KeyCtx) Result {
+func InterpretKey(state State, key string, ctx KeyCtx) Result {
 	input := state.Input
 	hist := state.Hist
 	mirror := func(newInput string, newHist int) State { return State{Input: newInput, Hist: newHist} }
@@ -129,7 +129,7 @@ func interpretKey(state State, key string, ctx KeyCtx) Result {
 		return quiet(mirror(input[:len(input)-1], hist))
 	}
 	if key == "tab" {
-		if s := suggest(input, ctx.History); s != "" {
+		if s := Suggest(input, ctx.History); s != "" {
 			return quiet(mirror(s, -1))
 		}
 		return press(state, "tab")

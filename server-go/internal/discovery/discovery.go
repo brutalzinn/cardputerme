@@ -1,11 +1,11 @@
-package main
+package discovery
 
 import (
 	"net"
 	"strconv"
 )
 
-func pickPort(isFree func(int) bool, start, tries int) int {
+func PickPort(isFree func(int) bool, start, tries int) int {
 	for port := start; port < start+tries; port++ {
 		if isFree(port) {
 			return port
@@ -14,7 +14,7 @@ func pickPort(isFree func(int) bool, start, tries int) int {
 	return 0
 }
 
-func freePort(port int) bool {
+func FreePort(port int) bool {
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		return false

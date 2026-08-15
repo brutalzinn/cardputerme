@@ -1,8 +1,8 @@
-package main
+package screen
 
 import "strconv"
 
-func rgb565(r, g, b int) uint16 {
+func RGB565(r, g, b int) uint16 {
 	return uint16(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3))
 }
 
@@ -17,21 +17,21 @@ var sys16 = func() [16]uint16 {
 	}
 	var out [16]uint16
 	for i, t := range src {
-		out[i] = rgb565(t[0], t[1], t[2])
+		out[i] = RGB565(t[0], t[1], t[2])
 	}
 	return out
 }()
 
-func xterm256(n int) uint16 {
+func Xterm256(n int) uint16 {
 	if n < 16 {
 		return sys16[n]
 	}
 	if n < 232 {
 		i := n - 16
-		return rgb565(cube[(i/36)%6], cube[(i/6)%6], cube[i%6])
+		return RGB565(cube[(i/36)%6], cube[(i/6)%6], cube[i%6])
 	}
 	level := 8 + (n-232)*10
-	return rgb565(level, level, level)
+	return RGB565(level, level, level)
 }
 
 func atoiDefault(s string) int {
@@ -50,8 +50,8 @@ func partAt(parts []string, i int) int {
 }
 
 // applySGR folds one escape's SGR params into the running (fg, bold) state.
-// Bold brightens the 8 basic colors (30-37 -> the 90-97 variant), which is how
-// most terminals render bold+color — so the device mirrors what you actually see.
+// Bold brightens the 8 basic colors (30-37 -> 90-97), matching how most
+// terminals render bold+color, so the device mirrors what you actually see.
 func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bool) {
 	parts := splitByte(params, ';')
 	if params == "" {
@@ -100,12 +100,12 @@ func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bo
 		if n == 38 {
 			mode := partAt(parts, k+1)
 			if mode == 5 {
-				fg = xterm256(partAt(parts, k+2))
+				fg = Xterm256(partAt(parts, k+2))
 				k += 3
 				continue
 			}
 			if mode == 2 {
-				fg = rgb565(partAt(parts, k+2), partAt(parts, k+3), partAt(parts, k+4))
+				fg = RGB565(partAt(parts, k+2), partAt(parts, k+3), partAt(parts, k+4))
 				k += 5
 				continue
 			}
@@ -121,7 +121,7 @@ func isFinalByte(c byte) bool {
 	return c >= '@' && c <= '~'
 }
 
-func parseLine(raw string, def uint16) (string, uint16) {
+func ParseLine(raw string, def uint16) (string, uint16) {
 	var text []byte
 	curFg := def
 	curBold := false
@@ -156,8 +156,8 @@ func parseLine(raw string, def uint16) (string, uint16) {
 	return string(text), lineColor
 }
 
-func stripAnsi(s string) string {
-	text, _ := parseLine(s, 0)
+func StripAnsi(s string) string {
+	text, _ := ParseLine(s, 0)
 	return text
 }
 

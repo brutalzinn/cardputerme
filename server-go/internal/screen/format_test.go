@@ -1,4 +1,4 @@
-package main
+package screen
 
 import (
 	"strings"
@@ -6,28 +6,28 @@ import (
 )
 
 func TestToAsciiTypography(t *testing.T) {
-	if got := toAscii("“hi” — it’s a test…"); got != "\"hi\" - it's a test..." {
+	if got := ToAscii("“hi” — it’s a test…"); got != "\"hi\" - it's a test..." {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestToAsciiDropsUnicode(t *testing.T) {
-	if got := toAscii("Pong! 🏓"); got != "Pong! " {
+	if got := ToAscii("Pong! 🏓"); got != "Pong! " {
 		t.Fatalf("got %q", got)
 	}
-	if got := toAscii("╭─ box ─╮"); got != " box " {
+	if got := ToAscii("╭─ box ─╮"); got != " box " {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestToAsciiKeepsNewlines(t *testing.T) {
-	if toAscii("a\nb") != "a\nb" {
+	if ToAscii("a\nb") != "a\nb" {
 		t.Fatal("newline")
 	}
 }
 
 func TestToAsciiExpandsTabs(t *testing.T) {
-	if got := toAscii("a\tb"); got != "a  b" {
+	if got := ToAscii("a\tb"); got != "a  b" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -45,19 +45,19 @@ func strsEq(a, b []string) bool {
 }
 
 func TestWrapLineWords(t *testing.T) {
-	if got := wrapLine("the quick brown fox", 10); !strsEq(got, []string{"the quick", "brown fox"}) {
+	if got := WrapLine("the quick brown fox", 10); !strsEq(got, []string{"the quick", "brown fox"}) {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestWrapLineHardBreak(t *testing.T) {
-	if got := wrapLine("supercalifragilistic", 10); !strsEq(got, []string{"supercalif", "ragilistic"}) {
+	if got := WrapLine("supercalifragilistic", 10); !strsEq(got, []string{"supercalif", "ragilistic"}) {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestSliceIntoCardsOneCard(t *testing.T) {
-	cards := sliceIntoCards("one two three four five six", 100, 2, 40)
+	cards := SliceIntoCards("one two three four five six", 100, 2, 40)
 	if len(cards) != 1 || cards[0][0] != "one two three four five six" {
 		t.Fatalf("got %+v", cards)
 	}
@@ -68,7 +68,7 @@ func TestSliceIntoCardsCap(t *testing.T) {
 	for i := range parts {
 		parts[i] = "line" + itoaSmall(i)
 	}
-	cards := sliceIntoCards(strings.Join(parts, "\n"), 20, 5, 3)
+	cards := SliceIntoCards(strings.Join(parts, "\n"), 20, 5, 3)
 	if len(cards) != 3 {
 		t.Fatalf("want 3 cards got %d", len(cards))
 	}
@@ -79,7 +79,7 @@ func TestSliceIntoCardsCap(t *testing.T) {
 }
 
 func TestSliceIntoCardsSanitizes(t *testing.T) {
-	cards := sliceIntoCards("Pong! 🏓", 20, 5, 40)
+	cards := SliceIntoCards("Pong! 🏓", 20, 5, 40)
 	if cards[0][0] != "Pong!" {
 		t.Fatalf("got %q", cards[0][0])
 	}

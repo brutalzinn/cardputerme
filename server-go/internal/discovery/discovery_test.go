@@ -1,11 +1,11 @@
-package main
+package discovery
 
 import "testing"
 
 func TestPickPortFirstFree(t *testing.T) {
 	probed := []int{}
 	isFree := func(p int) bool { probed = append(probed, p); return p >= 4713 }
-	if got := pickPort(isFree, 4711, 10); got != 4713 {
+	if got := PickPort(isFree, 4711, 10); got != 4713 {
 		t.Fatalf("got %d", got)
 	}
 	if !strsEqInt(probed, []int{4711, 4712, 4713}) {
@@ -14,13 +14,13 @@ func TestPickPortFirstFree(t *testing.T) {
 }
 
 func TestPickPortNoneFree(t *testing.T) {
-	if got := pickPort(func(int) bool { return false }, 4711, 3); got != 0 {
+	if got := PickPort(func(int) bool { return false }, 4711, 3); got != 0 {
 		t.Fatalf("got %d", got)
 	}
 }
 
 func TestPickPortStartFree(t *testing.T) {
-	if got := pickPort(func(int) bool { return true }, 4711, 3); got != 4711 {
+	if got := PickPort(func(int) bool { return true }, 4711, 3); got != 4711 {
 		t.Fatalf("got %d", got)
 	}
 }
@@ -28,7 +28,7 @@ func TestPickPortStartFree(t *testing.T) {
 func TestPickPortDefaultRange(t *testing.T) {
 	probed := []int{}
 	isFree := func(p int) bool { probed = append(probed, p); return false }
-	if got := pickPort(isFree, 8001, 255); got != 0 {
+	if got := PickPort(isFree, 8001, 255); got != 0 {
 		t.Fatalf("got %d", got)
 	}
 	if probed[0] != 8001 || probed[len(probed)-1] != 8255 || len(probed) != 255 {

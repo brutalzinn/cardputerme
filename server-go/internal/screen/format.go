@@ -1,4 +1,4 @@
-package main
+package screen
 
 import "strings"
 
@@ -12,10 +12,10 @@ var translit = map[rune]string{
 	'→': "->", '⇒': "->",
 	'←': "<-", '⇐': "<-",
 	'✓': "v", '✔': "v",
-	' ': " ",
+	' ': " ",
 }
 
-func toAscii(s string) string {
+func ToAscii(s string) string {
 	s = strings.ReplaceAll(s, "\t", "  ")
 	var b strings.Builder
 	for _, r := range s {
@@ -30,7 +30,7 @@ func toAscii(s string) string {
 	return b.String()
 }
 
-func wrapLine(line string, cols int) []string {
+func WrapLine(line string, cols int) []string {
 	runes := []rune(line)
 	if len(runes) <= cols {
 		return []string{line}
@@ -68,8 +68,8 @@ func wrapLine(line string, cols int) []string {
 	return out
 }
 
-func sliceIntoCards(text string, cols, linesPerCard, maxCards int) [][]string {
-	cleaned := toAscii(strings.ReplaceAll(stripAnsi(text), "\r", ""))
+func SliceIntoCards(text string, cols, linesPerCard, maxCards int) [][]string {
+	cleaned := ToAscii(strings.ReplaceAll(StripAnsi(text), "\r", ""))
 	rawLines := strings.Split(cleaned, "\n")
 	for len(rawLines) > 0 && strings.TrimSpace(rawLines[len(rawLines)-1]) == "" {
 		rawLines = rawLines[:len(rawLines)-1]
@@ -77,14 +77,14 @@ func sliceIntoCards(text string, cols, linesPerCard, maxCards int) [][]string {
 
 	wrapped := []string{}
 	for _, line := range rawLines {
-		for _, w := range wrapLine(line, cols) {
+		for _, w := range WrapLine(line, cols) {
 			wrapped = append(wrapped, strings.TrimRight(w, " "))
 		}
 	}
 
 	cards := [][]string{}
 	for i := 0; i < len(wrapped); i += linesPerCard {
-		end := minInt(i+linesPerCard, len(wrapped))
+		end := min(i+linesPerCard, len(wrapped))
 		cards = append(cards, wrapped[i:end])
 	}
 	if len(cards) > maxCards {
