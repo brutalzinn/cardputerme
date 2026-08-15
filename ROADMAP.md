@@ -4,15 +4,18 @@
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) builds+execs a **Go binary** that runs a background WS server for that ONE terminal on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device listens, lists every live exposure (**IPv4:port + name**), and connects to the one you pick. NO sessions concept, NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. Thin device: draws the server-described display, forwards raw keys; server owns everything (input, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
 
-## Focus — shipped
-Every planned task (#1–#17) is delivered. The system does the whole job: expose any terminal with `cardputerme`, discover it on the Cardputer over a UDP beacon, connect over WebSocket, and drive it with full parity — mirror, keys, prompts, history, autosuggest, marquee, zoom, faithful colors. Server is unit-tested (71), audited by a 4-agent pass, and race-clean. Next north star lives in ## Parked; pull one in to start a new cycle.
+## Focus — distribution (prebuilt binaries)
+Core #1–#17 shipped and hardware-verified. The one friction point left is **install**: today `bin/cardputer-server` compiles the Go server on first run, so every user needs a Go toolchain. Next north star = **prebuilt binaries** for macOS + Ubuntu so `cardputerme` installs with no Go. "Done" = downloadable binaries per OS/arch on GitHub Releases, launcher prefers them.
 
 ## 🎯 Now
-Nothing queued — the plan is empty (all 17 ✅). New work starts by promoting an item from ## Parked to a fresh 🟡.
+Next: **#18 Publish CLI binaries for macOS + Ubuntu** (⬜ queued, not started). Promote to 🟡 and start its tracker task when work begins.
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
-_Empty — all planned tasks shipped. Populate from ## Parked when the next cycle begins._
+
+**📅 Day 1 — next · Distribution**
+18. ⬜ **Publish CLI binaries for macOS + Ubuntu.** Cross-compile `server-go/cmd/cardputerme` (GOOS=darwin,linux × GOARCH=arm64,amd64) → `dist/cardputerme-<os>-<arch>`; add a `Makefile` `release` target and publish to GitHub Releases (`gh release create` or goreleaser). `bin/cardputer-server` prefers a prebuilt `dist/` binary, else builds from source. KISS, no co-authors.
+> 🚀 **Deploy (end of Day 1)** — a GitHub Release with macOS + Ubuntu binaries; fresh install needs no Go.
 
 ## Done 2026-08-15 (Go era)
 - **#14 Terminal-fidelity pass (SSH-parity).** Colors mirror the terminal: #14a bold→bright, plus bold basic colors now brighten regardless of SGR order (`6fa5b0d`, tracks the basic-color index through SGR state). bg/reverse documented out-of-scope (device is per-line fg only). 4-agent audit verified key handling, action dispatch, and pick-server end to end; fixed the one real defect — a data race on `terminal.Subscribe`'s stop flag → `atomic.Bool`, `go test -race` clean (`5679e67`). Dev ergonomics: `Makefile` (setup/test/build/flash) + gitignore polish.

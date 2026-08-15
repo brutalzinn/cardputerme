@@ -49,25 +49,18 @@ func partAt(parts []string, i int) int {
 	return atoiDefault(parts[i])
 }
 
-// effectiveColor resolves the running SGR state to the color a terminal shows.
-// A basic color (30-37, tracked as basic 0-7) brightens to 90-97 while bold is
-// active — regardless of whether bold arrived before or after the color, or in
-// a separate escape — matching how terminals render bold+color.
 func effectiveColor(fg uint16, bold bool, basic int) uint16 {
-	if bold && basic >= 0 {
+	if basic < 0 {
+		return fg
+	}
+	if bold {
 		return sys16[basic+8]
 	}
-	return fg
+	return sys16[basic]
 }
 
-// applySGR folds one escape's SGR params into the running (fg, bold, basic)
-// state. basic is the 30-37 index (0-7) when fg came from a basic color, else
-// -1; it lets bold brighten the color at render time, order-independently.
 func applySGR(params string, curFg uint16, curBold bool, curBasic int, def uint16) (uint16, bool, int) {
 	parts := splitByte(params, ';')
-	if params == "" {
-		parts = []string{"0"}
-	}
 	fg := curFg
 	bold := curBold
 	basic := curBasic
@@ -99,7 +92,6 @@ func applySGR(params string, curFg uint16, curBold bool, curBasic int, def uint1
 		}
 		if n >= 30 && n <= 37 {
 			basic = n - 30
-			fg = sys16[basic]
 			k++
 			continue
 		}
