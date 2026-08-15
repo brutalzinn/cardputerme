@@ -148,7 +148,10 @@ A `Makefile` at the repo root covers setup — run `make` to list targets:
 make setup      # install Go deps + create firmware/.env
 make test       # run the server tests
 make flash      # upload firmware to the Cardputer
+make release    # cross-compile CLI binaries into dist/ (macOS + Linux)
 ```
+
+`make release` builds static binaries for macOS and Linux (amd64 + arm64) into `dist/`; `make release-publish VERSION=vX.Y.Z` ships them to a GitHub Release. On a machine with no Go toolchain, drop the matching `dist/cardputerme-<os>-<arch>` binary in place and `bin/cardputer-server` uses it instead of building.
 
 Or drive the server directly:
 

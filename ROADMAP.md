@@ -8,13 +8,13 @@
 Core #1–#17 shipped and hardware-verified. The one friction point left is **install**: today `bin/cardputer-server` compiles the Go server on first run, so every user needs a Go toolchain. Next north star = **prebuilt binaries** for macOS + Ubuntu so `cardputerme` installs with no Go. "Done" = downloadable binaries per OS/arch on GitHub Releases, launcher prefers them.
 
 ## 🎯 Now
-Next: **#18 Publish CLI binaries for macOS + Ubuntu** (⬜ queued, not started). Promote to 🟡 and start its tracker task when work begins.
+Current: **#18 Publish CLI binaries for macOS + Ubuntu** *(🟡 started)*.
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
 
-**📅 Day 1 — next · Distribution**
-18. ⬜ **Publish CLI binaries for macOS + Ubuntu.** Cross-compile `server-go/cmd/cardputerme` (GOOS=darwin,linux × GOARCH=arm64,amd64) → `dist/cardputerme-<os>-<arch>`; add a `Makefile` `release` target and publish to GitHub Releases (`gh release create` or goreleaser). `bin/cardputer-server` prefers a prebuilt `dist/` binary, else builds from source. KISS, no co-authors.
+**📅 Day 1 — 2026-08-15 · Distribution**
+18. 🟡 **Publish CLI binaries for macOS + Ubuntu.** *(current)* `make release` cross-compiles `server-go/cmd/cardputerme` (CGO off; GOOS=darwin,linux × GOARCH=arm64,amd64) → `dist/cardputerme-<os>-<arch>`. `make release-publish VERSION=vX.Y.Z` ships them to GitHub Releases via `gh` (run when authed + tagged). `bin/cardputer-server` prefers a matching prebuilt `dist/` binary, else builds from source, else errors with guidance. KISS, no co-authors.
 > 🚀 **Deploy (end of Day 1)** — a GitHub Release with macOS + Ubuntu binaries; fresh install needs no Go.
 
 ## Done 2026-08-15 (Go era)

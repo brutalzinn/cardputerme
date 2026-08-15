@@ -2,6 +2,7 @@ llm/
 .env
 .pio/
 server-go/cardputerme
+dist/
 *.test
 coverage.out
 .DS_Store
