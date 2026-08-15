@@ -28,3 +28,4 @@ test('pickPort defaults to the 8001-8255 exposure range', async () => {
   assert.equal(probed[probed.length - 1], 8255);
   assert.equal(probed.length, 255);
 });
+

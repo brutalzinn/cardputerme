@@ -1,7 +1,7 @@
 {
-  "name": "cardputer-claude-server",
+  "name": "cardputerme-server",
   "version": "1.0.0",
-  "description": "Bridge server between an M5Stack Cardputer ADV and Claude Code running in a tmux session on the Mac Mini.",
+  "description": "cardputerme — expose a terminal to an M5Cardputer over WebSocket; one exposure = one server, discovered by UDP beacon.",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {

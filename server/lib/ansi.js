@@ -1,18 +1,11 @@
 'use strict';
 
-// Deterministic ANSI-color parsing — pure, NO regex. Translates the terminal's
-// OWN colors (from `tmux capture-pane -e`) into the Cardputer's RGB565, so the
-// device shows text in the same colors the terminal already uses (user vs agent,
-// etc.) without any color logic of its own — we only translate the color.
-
-// Pack 8-bit r,g,b into RGB565 (the device's native format).
 function rgb565(r, g, b) {
   return ((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3);
 }
 
 const CUBE = [0, 95, 135, 175, 215, 255];
 
-// The 16 system colors (standard xterm) as RGB565.
 const SYS16 = [
   [0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0],
   [0, 0, 128], [128, 0, 128], [0, 128, 128], [192, 192, 192],
@@ -20,7 +13,6 @@ const SYS16 = [
   [0, 0, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255],
 ].map(([r, g, b]) => rgb565(r, g, b));
 
-// xterm 256-color index -> RGB565.
 function xterm256(n) {
   if (n < 16) return SYS16[n];
   if (n < 232) {
@@ -31,7 +23,6 @@ function xterm256(n) {
   return rgb565(level, level, level);
 }
 
-// Apply one SGR parameter list to the current fg; return the new fg color.
 function applySGR(params, curFg, def) {
   const parts = params.length ? params.split(';') : ['0'];
   let fg = curFg;
@@ -47,7 +38,7 @@ function applySGR(params, curFg, def) {
       if (mode === 2) { fg = rgb565(parseInt(parts[k + 2] || '0', 10), parseInt(parts[k + 3] || '0', 10), parseInt(parts[k + 4] || '0', 10)); k += 5; continue; }
       k += 1; continue;
     }
-    k += 1;  // ignore bold/italic/background/etc.
+    k += 1;
   }
   return fg;
 }
@@ -56,7 +47,6 @@ function isFinalByte(c) {
   return c >= '@' && c <= '~';
 }
 
-// Parse a line with ANSI escapes -> { text (clean), color (fg at 1st visible char) }.
 function parseLine(raw, defaultColor) {
   const s = String(raw == null ? '' : raw);
   let text = '';
@@ -73,7 +63,7 @@ function parseLine(raw, defaultColor) {
       i = j + 1;
       continue;
     }
-    if (c === '\x1b') { i += 1; continue; }   // stray / non-CSI escape
+    if (c === '\x1b') { i += 1; continue; }
     text += c;
     if (!colorSet && c !== ' ') { lineColor = curFg; colorSet = true; }
     i += 1;
@@ -86,3 +76,4 @@ function stripAnsi(s) {
 }
 
 module.exports = { rgb565, xterm256, parseLine, stripAnsi };
+

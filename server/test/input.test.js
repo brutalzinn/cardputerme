@@ -3,10 +3,6 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { interpretKey, isDigits } = require('../lib/input');
 
-// The LAZY-DEVICE contract: the device forwards every raw key; the SERVER owns
-// the input buffer, all special functions, and what to send to the terminal.
-// One terminal per server — there is no session picker.
-
 const MIRROR = (input) => ({ mode: 'mirror', input: input || '' });
 const ctx = (over) => Object.assign({ awaiting: false }, over);
 
@@ -15,7 +11,6 @@ test('helpers scan chars (no regex)', () => {
   assert.equal(isDigits('4a'), false);
 });
 
-// --- typing into the server-owned buffer
 test('a char appends to the input buffer (no terminal send)', () => {
   const r = interpretKey(MIRROR(''), 'h', ctx());
   assert.equal(r.state.input, 'h');
@@ -44,7 +39,6 @@ test('enter with an empty buffer presses Enter in the terminal', () => {
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'enter' });
 });
 
-// --- esc: the special function key, fully server-side
 test('esc while typing CLEARS the input (cancel current sending)', () => {
   const r = interpretKey(MIRROR('half a mess'), 'esc', ctx());
   assert.equal(r.state.input, '');
@@ -58,7 +52,6 @@ test('esc with nothing typed reaches the terminal as a real Escape (ssh-parity)'
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'escape' });
 });
 
-// --- prompts use digits
 test('digit answers an on-screen menu when awaiting and not typing', () => {
   const r = interpretKey(MIRROR(''), '2', ctx({ awaiting: true }));
   assert.deepEqual(r.action, { kind: 'pressKey', key: '2' });
@@ -96,8 +89,6 @@ test('opt+arrows send real arrow keys to the terminal (drive its selector)', () 
   assert.deepEqual(interpretKey(MIRROR(''), 'opt+left', ctx()).action, { kind: 'pressKey', key: 'left' });
 });
 
-// --- shift+esc: STOP the agent — a real Escape into the terminal (Claude
-// Code's own "esc to interrupt"), without touching the user's draft.
 test('shift+esc interrupts the terminal activity and keeps the input', () => {
   const r = interpretKey(MIRROR('my draft'), 'shift+esc', ctx());
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'escape' });
@@ -110,7 +101,6 @@ test('shift+esc works with an empty input too', () => {
   assert.equal(r.state.mode, 'mirror');
 });
 
-// --- Ctrl combos: real control keys reach the terminal (feel-at-home).
 test('ctrl+<letter> sends the control key to the terminal', () => {
   const r = interpretKey(MIRROR(''), 'ctrl+c', ctx());
   assert.deepEqual(r.action, { kind: 'pressKey', key: 'ctrl+c' });
@@ -121,8 +111,7 @@ test('ctrl combos do not disturb the input buffer', () => {
   assert.equal(r.state.input, 'keep me');
 });
 
-// --- Command history recall (ctrl+up = prev, ctrl+down = next — shell idiom).
-const HIST = ['first cmd', 'second cmd', 'third cmd'];   // oldest -> newest
+const HIST = ['first cmd', 'second cmd', 'third cmd'];
 
 test('ctrl+up recalls the newest command into the input', () => {
   const r = interpretKey(MIRROR(''), 'ctrl+up', ctx({ history: HIST }));
@@ -136,16 +125,16 @@ test('ctrl+up again steps further back (and floors at the oldest)', () => {
   s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;
   assert.equal(s.input, 'second cmd');
   s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;
-  s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;   // extra press
-  assert.equal(s.input, 'first cmd');                            // floored
+  s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;
+  assert.equal(s.input, 'first cmd');
 });
 
 test('ctrl+down steps forward; past the newest clears the input', () => {
-  let s = interpretKey(MIRROR(''), 'ctrl+up', ctx({ history: HIST })).state;   // third
-  s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;                // second
-  s = interpretKey(s, 'ctrl+down', ctx({ history: HIST })).state;                // third again
+  let s = interpretKey(MIRROR(''), 'ctrl+up', ctx({ history: HIST })).state;
+  s = interpretKey(s, 'ctrl+up', ctx({ history: HIST })).state;
+  s = interpretKey(s, 'ctrl+down', ctx({ history: HIST })).state;
   assert.equal(s.input, 'third cmd');
-  s = interpretKey(s, 'ctrl+down', ctx({ history: HIST })).state;                // past newest
+  s = interpretKey(s, 'ctrl+down', ctx({ history: HIST })).state;
   assert.equal(s.input, '');
   assert.equal(s.hist, null);
 });
@@ -155,7 +144,7 @@ test('a recalled command is editable and Enter sends the edited text', () => {
   s = interpretKey(s, '!', ctx({ history: HIST })).state;
   const r = interpretKey(s, 'enter', ctx({ history: HIST }));
   assert.deepEqual(r.action, { kind: 'send', text: 'third cmd!' });
-  assert.equal(r.state.hist, null);                              // send resets recall
+  assert.equal(r.state.hist, null);
 });
 
 test('ctrl+up with no history does nothing', () => {
@@ -169,5 +158,6 @@ test('esc on a recalled draft clears input and recall state', () => {
   const r = interpretKey(s, 'esc', ctx({ history: HIST }));
   assert.equal(r.state.input, '');
   assert.equal(r.state.hist, null);
-  assert.equal(r.state.mode, 'mirror');                          // clear, not picker
+  assert.equal(r.state.mode, 'mirror');
 });
+

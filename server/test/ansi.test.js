@@ -15,10 +15,10 @@ test('rgb565 packs r,g,b into 16-bit 565', () => {
 });
 
 test('xterm256 maps cube + greyscale indices', () => {
-  assert.equal(xterm256(196), rgb565(255, 0, 0));   // cube bright red
-  assert.equal(xterm256(231), rgb565(255, 255, 255)); // cube white
-  assert.equal(xterm256(16), rgb565(0, 0, 0));      // cube black
-  assert.equal(xterm256(255), rgb565(238, 238, 238)); // top greyscale
+  assert.equal(xterm256(196), rgb565(255, 0, 0));
+  assert.equal(xterm256(231), rgb565(255, 255, 255));
+  assert.equal(xterm256(16), rgb565(0, 0, 0));
+  assert.equal(xterm256(255), rgb565(238, 238, 238));
 });
 
 test('stripAnsi removes escape sequences, keeping text', () => {
@@ -49,3 +49,4 @@ test('parseLine ignores leading spaces when picking the line color', () => {
   assert.equal(r.text, '   X');
   assert.equal(r.color, xterm256(196));
 });
+

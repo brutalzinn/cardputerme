@@ -9,3 +9,4 @@ function beaconMessage(name, port) {
 }
 
 module.exports = { beaconMessage, BEACON_PORT, BEACON_ADDR, BEACON_INTERVAL_MS };
+

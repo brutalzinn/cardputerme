@@ -1,29 +1,22 @@
 'use strict';
 
-// Text formatting for the Cardputer's ASCII, monospace, 20-col screen.
-// Pure functions — no I/O — so they are unit-testable.
-
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
-// The Cardputer's built-in font is ASCII-only. Transliterate common
-// typography, drop everything else (emoji, box-drawing) that would render
-// as garbage. Newlines are preserved.
 function toAscii(s) {
   return String(s)
-    .replace(/[‘’‛]/g, "'") // ' ' ‛  -> '
-    .replace(/[“”]/g, '"')        // " "     -> "
-    .replace(/[–—−]/g, '-')  // – — −   -> -
-    .replace(/…/g, '...')              // …       -> ...
-    .replace(/[•·]/g, '*')        // • ·     -> *
-    .replace(/[❯▶›]/g, '>')       // selection pointer -> '>' (must stay visible)
-    .replace(/[→⇒]/g, '->')       // → ⇒     -> ->
-    .replace(/[←⇐]/g, '<-')       // ← ⇐     -> <-
-    .replace(/[✓✔]/g, 'v')        // ✓ ✔     -> v
-    .replace(/ /g, ' ')                // nbsp    -> space
-    .replace(/[^\x0A\x20-\x7E]/g, '');      // drop remaining non-ASCII
+    .replace(/[‘’‛]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—−]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[•·]/g, '*')
+    .replace(/[❯▶›]/g, '>')
+    .replace(/[→⇒]/g, '->')
+    .replace(/[←⇐]/g, '<-')
+    .replace(/[✓✔]/g, 'v')
+    .replace(/ /g, ' ')
+    .replace(/[^\x0A\x20-\x7E]/g, '');
 }
 
-// Word-wrap one logical line to `cols`; hard-break words longer than a line.
 function wrapLine(line, cols) {
   if (line.length <= cols) return [line];
   const out = [];
@@ -44,8 +37,6 @@ function wrapLine(line, cols) {
   return out.length ? out : [''];
 }
 
-// Turn arbitrary text into cards (array of arrays of <=linesPerCard lines).
-// maxCards keeps the newest cards (the tail = what the user just saw).
 function sliceIntoCards(text, cols, linesPerCard, maxCards = 40) {
   const cleaned = toAscii(String(text).replace(ANSI, '').replace(/\r/g, ''));
   let rawLines = cleaned.split('\n');
@@ -54,7 +45,7 @@ function sliceIntoCards(text, cols, linesPerCard, maxCards = 40) {
   const wrapped = [];
   for (const line of rawLines) {
     for (const w of wrapLine(line.replace(/\t/g, '  '), cols)) {
-      wrapped.push(w.replace(/\s+$/, '')); // trim trailing space for clean display
+      wrapped.push(w.replace(/\s+$/, ''));
     }
   }
 
@@ -67,3 +58,4 @@ function sliceIntoCards(text, cols, linesPerCard, maxCards = 40) {
 }
 
 module.exports = { toAscii, wrapLine, sliceIntoCards };
+

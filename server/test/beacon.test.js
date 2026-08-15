@@ -13,3 +13,4 @@ test('beacon constants: fixed UDP port 8000, subnet broadcast, ~2s cadence', () 
   assert.equal(BEACON_ADDR, '255.255.255.255');
   assert.equal(BEACON_INTERVAL_MS, 2000);
 });
+

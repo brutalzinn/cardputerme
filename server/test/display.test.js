@@ -3,10 +3,6 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { buildDisplay, COLORS } = require('../lib/display');
 
-// The generic display protocol: server decides text + color per body line and a
-// bottom status bar. No semantic roles cross the wire — only colors. This is
-// where the old device-side "> " prompt inference lives now.
-
 test('buildDisplay wraps body lines into {text,color} and adds a status bar', () => {
   const msg = buildDisplay(['hello world'], '[generic] ready', {});
   assert.equal(msg.type, 'display');
@@ -40,3 +36,4 @@ test('buildDisplay coerces non-string cells + status to strings', () => {
 test('COLORS are explicit RGB565 numbers incl. a status color', () => {
   for (const k of ['text', 'prompt', 'ask', 'status']) assert.equal(typeof COLORS[k], 'number');
 });
+
