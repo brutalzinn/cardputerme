@@ -4,11 +4,11 @@
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) builds+execs a **Go binary** that runs a background WS server for that ONE terminal on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device listens, lists every live exposure (**IPv4:port + name**), and connects to the one you pick. NO sessions concept, NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. Thin device: draws the server-described display, forwards raw keys; server owns everything (input, history, viewport). House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
 
-## Focus — distribution (prebuilt binaries)
-Core #1–#17 shipped and hardware-verified. The one friction point left is **install**: today `bin/cardputer-server` compiles the Go server on first run, so every user needs a Go toolchain. Next north star = **prebuilt binaries** for macOS + Ubuntu so `cardputerme` installs with no Go. "Done" = downloadable binaries per OS/arch on GitHub Releases, launcher prefers them.
+## Focus — ✅ ALL SHIPPED
+Every planned task (#1–#19) is delivered. The whole job is done: expose any terminal with `cardputerme`, discover it on the Cardputer over a UDP beacon, connect over WebSocket, and drive it with full SSH-parity — mirror, keys, prompts, history, autosuggest, marquee, zoom, faithful colors. Go server is unit-tested (72), 4-agent-audited, and race-clean. Install needs no Go: prebuilt macOS + Ubuntu binaries cross-compile via `make release` and ship through a manual tag-driven GitHub Action. `v0.0.1` tagged. Next north star lives in ## Parked — pull one in to open a new cycle.
 
 ## 🎯 Now
-Nothing queued — the plan is empty (all 19 ✅). New work starts by promoting an item from ## Parked to a fresh 🟡.
+Nothing queued — the plan is empty (all 19 ✅, project shipped). New work starts by promoting an item from ## Parked to a fresh 🟡.
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
