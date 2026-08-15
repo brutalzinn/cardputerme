@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -110,11 +111,11 @@ func (b *Backend) SendKey(key string) bool {
 func (b *Backend) Subscribe(onChange, onGone func()) func() {
 	fifo := filepath.Join(os.TempDir(), "cardputerme-"+b.session+"-"+strconv.Itoa(os.Getpid())+".fifo")
 	os.Remove(fifo)
-	stopped := false
+	var stopped atomic.Bool
 
 	var read func()
 	read = func() {
-		if stopped {
+		if stopped.Load() {
 			return
 		}
 		f, err := os.OpenFile(fifo, os.O_RDONLY, os.ModeNamedPipe)
@@ -132,7 +133,7 @@ func (b *Backend) Subscribe(onChange, onGone func()) func() {
 			}
 		}
 		f.Close()
-		if stopped {
+		if stopped.Load() {
 			return
 		}
 		if !b.Exists() {
@@ -148,7 +149,7 @@ func (b *Backend) Subscribe(onChange, onGone func()) func() {
 	}
 
 	return func() {
-		stopped = true
+		stopped.Store(true)
 		tmux("pipe-pane", "-t", b.session)
 		os.Remove(fifo)
 	}
