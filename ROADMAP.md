@@ -8,7 +8,7 @@
 The server is done, restructured, and proven at parity (67 tests). The whole system already works on hardware: the Cardputer discovers, connects, mirrors, drives the live Claude Code session, and answers prompts. "Done" = every remaining checklist item eyeballed on the physical device, fixing server-side as issues surface.
 
 ## 🎯 Now
-Current: **#8 device E2E** — run the remaining on-device checklist; fix each failure (server-side preferred; flash only for firmware).
+Current: **#8 device E2E** — resume the remaining on-device checklist (zoom just verified). Fix each failure (server-side preferred; flash only for firmware).
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
@@ -17,15 +17,12 @@ Current: **#8 device E2E** — run the remaining on-device checklist; fix each f
 8. 🟡 **E2E verification (user-run).** *(current)* CORE PASSING on hardware: device 192.168.0.69 discovered via beacon → connected → mirrored → ran commands → drove live Claude Code → answered a prompt. **3 bugs E2E caught + fixed:** beacon subnet-directed broadcast (`652d4f7`); prompt detection over the blank-trimmed grid the device shows (not raw last-N rows); `lastAwaiting` syncs on client connect (digit answers a prompt already on screen). Remaining to eyeball: history recall (ctrl+fn-↑/↓), autosuggest dim ghost legibility + Tab-accept (folds in #13 UX), status marquee, fn+esc back to picker, colors/layout side-by-side vs a real terminal (folds in #14b). Harness: `ask` exposure runs a live `1/2/3` menu.
 > 🚀 **Deploy (end of Day 1)** — remaining checklist passes on the device.
 
-**📅 Day 2 — 2026-08-16 · Zoom**
-11. 🟡 **Zoom (server-owned text size).** *(code done 2026-08-15; flash pending USB)* Display message carries `size` (one font, different `setTextSize` scales); **ctrl+= / ctrl+-** zoom in/out (FSM `zoom` action, clamped 1–3, size 2 = baseline); viewport `cols()`/`rows()` derive inversely from size. Firmware reads `size` → `setTextSize` + dynamic `lineH()`; compiles (RAM 15%/flash 32%). 71 tests, deadcode clean. **Remaining: flash + verify on device (user does upload LAST); tune size steps on the 240×135 screen.**
-> 🚀 **Deploy (end of Day 2)** — flash; ctrl+=/- resizes text live; layout re-derives.
-
-**📅 Day 3 — 2026-08-17 · Fidelity + polish**
+**📅 Day 2 — 2026-08-16 · Fidelity + polish**
 14. ⬜ **Terminal-fidelity pass (SSH-parity).** #14a bold→bright done (`ansi.go`); remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + `ls --color`); decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; README truth-pass. Server-only, TDD.
-> 🚀 **Deploy (end of Day 3)** — colors faithful; layout mirrors the terminal; docs true.
+> 🚀 **Deploy (end of Day 2)** — colors faithful; layout mirrors the terminal; docs true.
 
 ## Done 2026-08-15 (Go era)
+- **#11 Zoom (server-owned text size) — verified on device.** Display msg carries `size` (one font, `setTextSize` scales); **ctrl+= / ctrl+_** (Cardputer +/-) zoom in/out, **ctrl+space** resets; viewport `cols()`/`rows()` derive inversely from size (1↔3, size 2 baseline). History recall stays on ctrl+up/down; nav (fn/opt+arrows) unchanged. Firmware flashed; zoom confirmed working on hardware.
 - **#16 Conventional Go CLI layout + on-device fixes.** `server-go/` → `cmd/cardputerme/main.go` + `internal/{screen,input,discovery,terminal,server}`; `Server` struct replaces globals; JS `server/` removed; dead code purged (`EndsWithQuestion`, `hub.sendTo`), `deadcode`+`go vet` clean; 67 tests across packages. On-device fixes: grid-based prompt detection, awaiting-on-connect, beacon subnet-broadcast, WS connect logging.
 - **#15 Go rewrite (very fast, event-driven, no polling).** tmux `pipe-pane`→fifo change-signal (session death on stream close, zero timers); regex-free; gorilla/websocket; wire integration test (real tmux + gorilla client). JS retired (−658 files).
 - **#13 History autosuggest core.** `Suggest()` newest prefix match; Tab accepts (else passes through); dim ghost preview line. *(Ghost UX tuning → #8 on device.)*
