@@ -231,8 +231,6 @@ async function applyKey(key) {
     broadcast(displayMessage(composeMirror(cachedMirror.grid, cachedMirror.status, cachedMirror.awaiting)));
     return;
   }
-  const touchedTerminal = action.kind === 'send' || action.kind === 'pressKey';
-  setTimeout(() => pushIfChanged(true).catch(() => {}), touchedTerminal ? 250 : 0);
 }
 
 wss.on('connection', async (ws, req) => {
@@ -261,13 +259,16 @@ wss.on('connection', async (ws, req) => {
   });
 });
 
-setInterval(async () => {
-  if (await terminal.exists()) return;
-  console.log(`[expose] terminal '${NAME}' is gone — shutting down`);
-  process.exit(0);
-}, 60000);
+let pushSoon = null;
+function schedulePush() {
+  if (pushSoon) return;
+  pushSoon = setTimeout(() => { pushSoon = null; pushIfChanged(false).catch(() => {}); }, 40);
+}
 
-setInterval(() => { if (wss.clients.size) pushIfChanged(false).catch(() => {}); }, 800);
+terminal.subscribe({
+  onChange: schedulePush,
+  onGone: () => { console.log(`[expose] terminal '${NAME}' is gone — shutting down`); process.exit(0); },
+});
 
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 20000);
 

@@ -1,6 +1,9 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const KEY_NAMES = {
   enter: 'Enter',
@@ -64,6 +67,34 @@ function createBackend({ session, scrollbackLines = 200, runner = run, typeDelay
         ? ['send-keys', '-t', session, named]
         : ['send-keys', '-t', session, '-l', key];
       return (await runner('tmux', args)).code === 0;
+    },
+
+    subscribe({ onChange, onGone }) {
+      const fifo = path.join(os.tmpdir(), `cardputerme-${session}-${process.pid}.fifo`);
+      let stream = null;
+      let stopped = false;
+      const open = () => {
+        if (stopped) return;
+        stream = fs.createReadStream(fifo);
+        stream.on('data', () => onChange());
+        stream.on('error', () => {});
+        stream.on('close', async () => {
+          if (stopped) return;
+          if ((await runner('tmux', ['has-session', '-t', session])).code !== 0) { onGone(); return; }
+          open();
+        });
+      };
+      try { fs.unlinkSync(fifo); } catch { /* absent */ }
+      execFile('mkfifo', [fifo], () => {
+        runner('tmux', ['pipe-pane', '-o', '-t', session, `cat > '${fifo}'`]);
+        open();
+      });
+      return () => {
+        stopped = true;
+        if (stream) stream.destroy();
+        runner('tmux', ['pipe-pane', '-t', session]);
+        try { fs.unlinkSync(fifo); } catch { /* absent */ }
+      };
     },
   };
 }
