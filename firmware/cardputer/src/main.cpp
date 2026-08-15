@@ -399,7 +399,6 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
       continue;
     }
     const char* arrow = arrowFor(c);
-    if (arrow && st.ctrl && st.fn) { sendKey((String("ctrl+fn+") + arrow).c_str()); continue; }
     if (arrow && st.fn) { sendKey(arrow); continue; }
     if (arrow && st.opt) { sendKey((String("opt+") + arrow).c_str()); continue; }
     if (arrow && st.ctrl) { sendKey((String("ctrl+") + arrow).c_str()); continue; }

@@ -78,16 +78,16 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 		return quiet(state)
 	}
 	if mod == "ctrl" {
-		if base == "up" {
+		if base == "=" || base == "+" {
 			return Result{state, Action{Kind: "zoom", Key: "in"}}
 		}
-		if base == "down" {
+		if base == "-" || base == "_" {
 			return Result{state, Action{Kind: "zoom", Key: "out"}}
 		}
 		if base == " " {
 			return Result{state, Action{Kind: "zoom", Key: "reset"}}
 		}
-		if base == "fn+up" {
+		if base == "up" {
 			if len(ctx.History) == 0 {
 				return quiet(state)
 			}
@@ -97,7 +97,7 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 			}
 			return quiet(mirror(ctx.History[idx], idx))
 		}
-		if base == "fn+down" {
+		if base == "down" {
 			if hist == -1 {
 				return quiet(state)
 			}

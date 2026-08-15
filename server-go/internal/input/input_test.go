@@ -136,11 +136,15 @@ func TestCtrlLetter(t *testing.T) {
 }
 
 func TestZoomChords(t *testing.T) {
-	if r := InterpretKey(mir(""), "ctrl+up", KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "in" {
-		t.Fatalf("ctrl+up got %+v", r)
+	for _, k := range []string{"ctrl+=", "ctrl++"} {
+		if r := InterpretKey(mir(""), k, KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "in" {
+			t.Fatalf("%s got %+v", k, r)
+		}
 	}
-	if r := InterpretKey(mir(""), "ctrl+down", KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "out" {
-		t.Fatalf("ctrl+down got %+v", r)
+	for _, k := range []string{"ctrl+-", "ctrl+_"} {
+		if r := InterpretKey(mir(""), k, KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "out" {
+			t.Fatalf("%s got %+v", k, r)
+		}
 	}
 	if r := InterpretKey(mir(""), "ctrl+ ", KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "reset" {
 		t.Fatalf("ctrl+space got %+v", r)
@@ -152,41 +156,41 @@ func TestZoomChords(t *testing.T) {
 
 var hist = []string{"first cmd", "second cmd", "third cmd"}
 
-func TestHistoryRecallOnCtrlFnUp(t *testing.T) {
-	r := InterpretKey(mir(""), "ctrl+fn+up", KeyCtx{History: hist})
+func TestCtrlUpRecallsNewest(t *testing.T) {
+	r := InterpretKey(mir(""), "ctrl+up", KeyCtx{History: hist})
 	if r.State.Input != "third cmd" || r.State.Hist != 2 {
 		t.Fatalf("got %+v", r)
 	}
 }
 
-func TestHistoryStepsBackAndFloors(t *testing.T) {
-	s := InterpretKey(mir(""), "ctrl+fn+up", KeyCtx{History: hist}).State
-	s = InterpretKey(s, "ctrl+fn+up", KeyCtx{History: hist}).State
+func TestCtrlUpStepsBackAndFloors(t *testing.T) {
+	s := InterpretKey(mir(""), "ctrl+up", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+up", KeyCtx{History: hist}).State
 	if s.Input != "second cmd" {
 		t.Fatalf("got %q", s.Input)
 	}
-	s = InterpretKey(s, "ctrl+fn+up", KeyCtx{History: hist}).State
-	s = InterpretKey(s, "ctrl+fn+up", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+up", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+up", KeyCtx{History: hist}).State
 	if s.Input != "first cmd" {
 		t.Fatalf("floor got %q", s.Input)
 	}
 }
 
-func TestHistoryForwardClears(t *testing.T) {
-	s := InterpretKey(mir(""), "ctrl+fn+up", KeyCtx{History: hist}).State
-	s = InterpretKey(s, "ctrl+fn+up", KeyCtx{History: hist}).State
-	s = InterpretKey(s, "ctrl+fn+down", KeyCtx{History: hist}).State
+func TestCtrlDownForwardClears(t *testing.T) {
+	s := InterpretKey(mir(""), "ctrl+up", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+up", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+down", KeyCtx{History: hist}).State
 	if s.Input != "third cmd" {
 		t.Fatalf("got %q", s.Input)
 	}
-	s = InterpretKey(s, "ctrl+fn+down", KeyCtx{History: hist}).State
+	s = InterpretKey(s, "ctrl+down", KeyCtx{History: hist}).State
 	if s.Input != "" || s.Hist != -1 {
 		t.Fatalf("got %+v", s)
 	}
 }
 
 func TestRecalledEditableAndSends(t *testing.T) {
-	s := InterpretKey(mir(""), "ctrl+fn+up", KeyCtx{History: hist}).State
+	s := InterpretKey(mir(""), "ctrl+up", KeyCtx{History: hist}).State
 	s = InterpretKey(s, "!", KeyCtx{History: hist}).State
 	r := InterpretKey(s, "enter", KeyCtx{History: hist})
 	if r.Action.Text != "third cmd!" || r.State.Hist != -1 {
@@ -194,8 +198,8 @@ func TestRecalledEditableAndSends(t *testing.T) {
 	}
 }
 
-func TestHistoryNoHistory(t *testing.T) {
-	r := InterpretKey(mir(""), "ctrl+fn+up", KeyCtx{History: []string{}})
+func TestCtrlUpNoHistory(t *testing.T) {
+	r := InterpretKey(mir(""), "ctrl+up", KeyCtx{History: []string{}})
 	if r.State.Input != "" || r.Action.Kind != "none" {
 		t.Fatalf("got %+v", r)
 	}
