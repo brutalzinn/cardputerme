@@ -28,6 +28,7 @@ type Cell struct {
 
 type DisplayMessage struct {
 	Type   string `json:"type"`
+	Size   int    `json:"size"`
 	Body   []Cell `json:"body"`
 	Status Cell   `json:"status"`
 }
@@ -42,13 +43,14 @@ func LineColor(text string, awaiting bool) uint16 {
 	return Colors.Text
 }
 
-func BuildDisplay(body []Line, statusText string) DisplayMessage {
+func BuildDisplay(body []Line, statusText string, size int) DisplayMessage {
 	cells := make([]Cell, 0, len(body))
 	for _, l := range body {
 		cells = append(cells, Cell{Text: l.Text, Color: l.Color})
 	}
 	return DisplayMessage{
 		Type:   "display",
+		Size:   size,
 		Body:   cells,
 		Status: Cell{Text: statusText, Color: Colors.Status},
 	}

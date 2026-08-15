@@ -6,8 +6,8 @@ import (
 )
 
 func TestBuildDisplayAssembles(t *testing.T) {
-	msg := BuildDisplay([]Line{{"hello world", Colors.Text}}, "[generic] ready")
-	if msg.Type != "display" || len(msg.Body) != 1 {
+	msg := BuildDisplay([]Line{{"hello world", Colors.Text}}, "[generic] ready", 2)
+	if msg.Type != "display" || msg.Size != 2 || len(msg.Body) != 1 {
 		t.Fatalf("got %+v", msg)
 	}
 	if msg.Body[0].Text != "hello world" || msg.Body[0].Color != Colors.Text {
@@ -31,15 +31,15 @@ func TestLineColorRules(t *testing.T) {
 }
 
 func TestBuildDisplayEmpty(t *testing.T) {
-	msg := BuildDisplay([]Line{}, "")
+	msg := BuildDisplay([]Line{}, "", 2)
 	if len(msg.Body) != 0 || msg.Status.Text != "" || msg.Status.Color != Colors.Status {
 		t.Fatalf("got %+v", msg)
 	}
 }
 
 func TestDisplayJSONShape(t *testing.T) {
-	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s"))
-	want := `{"type":"display","body":[{"text":"hi","color":65535}],"status":{"text":"s","color":2047}}`
+	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", 3))
+	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"status":{"text":"s","color":2047}}`
 	if string(b) != want {
 		t.Fatalf("json = %s", b)
 	}

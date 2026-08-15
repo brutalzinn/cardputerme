@@ -26,7 +26,6 @@ const unsigned long BEACON_TTL_MS = 6500;
 #define SCR_H       135
 #define HEADER_H    14
 #define STATUS_H    16
-#define LINE_H      16
 #define SBAR_W      3
 
 #define COL_BG      0x0000
@@ -43,6 +42,9 @@ String   g_status = "";
 uint16_t g_statusColor = COL_ACCENT;
 bool     g_sessionExists = false;
 int      g_page = 0;
+int      g_size = 2;
+
+int lineH() { return g_size * 8; }
 
 bool follow = true;
 
@@ -73,7 +75,7 @@ int bodyBottom() {
   return SCR_H - STATUS_H;
 }
 int linesPerPage() {
-  int n = (bodyBottom() - HEADER_H) / LINE_H;
+  int n = (bodyBottom() - HEADER_H) / lineH();
   return n < 1 ? 1 : n;
 }
 int pageCount() {
@@ -141,7 +143,7 @@ void drawBody() {
   auto& d = M5Cardputer.Display;
   int bb = bodyBottom();
   d.fillRect(0, HEADER_H, SCR_W - SBAR_W, bb - HEADER_H, COL_BG);
-  d.setTextSize(2);
+  d.setTextSize(g_size);
 
   if (g_lines.empty()) {
     d.setTextColor(COL_DIM, COL_BG);
@@ -155,11 +157,11 @@ void drawBody() {
   int start = g_page * lpp;
   int y = HEADER_H + 2;
   for (int i = start; i < start + lpp && i < (int)g_lines.size(); i++) {
-    if (y + LINE_H > bb) break;
+    if (y + lineH() > bb) break;
     d.setTextColor(g_lines[i].color, COL_BG);
     d.setCursor(3, y);
     d.print(g_lines[i].text);
-    y += LINE_H;
+    y += lineH();
   }
   drawScrollbar();
 }
@@ -316,6 +318,7 @@ void beep(bool question) {
 
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
+  g_size = doc["size"] | 2;
   JsonObject status = doc["status"];
   String newStatus = String((const char*)(status["text"] | ""));
   if (newStatus != g_status) g_statusOffset = 0;

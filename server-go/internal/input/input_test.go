@@ -135,6 +135,18 @@ func TestCtrlLetter(t *testing.T) {
 	}
 }
 
+func TestZoomChords(t *testing.T) {
+	if r := InterpretKey(mir(""), "ctrl+=", KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "in" {
+		t.Fatalf("ctrl+= got %+v", r)
+	}
+	if r := InterpretKey(mir(""), "ctrl+-", KeyCtx{}); r.Action.Kind != "zoom" || r.Action.Key != "out" {
+		t.Fatalf("ctrl+- got %+v", r)
+	}
+	if r := InterpretKey(mir(""), "ctrl+a", KeyCtx{}); r.Action.Kind != "pressKey" {
+		t.Fatalf("ctrl+a should pass through, got %+v", r)
+	}
+}
+
 var hist = []string{"first cmd", "second cmd", "third cmd"}
 
 func TestCtrlUpRecallsNewest(t *testing.T) {

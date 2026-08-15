@@ -52,6 +52,7 @@ type mirrorCache struct {
 type stateResult struct {
 	lines         []screen.Line
 	status        string
+	size          int
 	sessionExists bool
 	awaiting      bool
 }
@@ -69,6 +70,7 @@ type Server struct {
 	hist         int
 	history      []string
 	view         screen.View
+	size         int
 	cache        *mirrorCache
 	lastSig      string
 	lastAwaiting bool
@@ -76,6 +78,12 @@ type Server struct {
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
 }
+
+const (
+	baseSize = 2 // WrapCols/viewRows are calibrated at text size 2
+	sizeMin  = 1
+	sizeMax  = 3
+)
 
 func New(cfg Config) *Server {
 	return &Server{
@@ -85,8 +93,14 @@ func New(cfg Config) *Server {
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		view:     screen.View{Follow: true, SelRow: -1},
 		hist:     -1,
+		size:     baseSize,
 	}
 }
+
+// cols/rows scale inversely with text size — bigger text, fewer fit on the
+// 240x135 screen. Calibrated so size 2 == the configured WrapCols x viewRows.
+func (s *Server) cols() int { return max(1, s.cfg.WrapCols*baseSize/s.size) }
+func (s *Server) rows() int { return max(1, viewRows*baseSize/s.size) }
 
 func clamp(v, lo, hi int) int {
 	if v < lo {
@@ -175,14 +189,15 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 			maxLen = rl
 		}
 	}
-	maxRow := max(0, len(grid)-viewRows)
-	maxCol := max(0, maxLen-s.cfg.WrapCols)
+	cols, rows := s.cols(), s.rows()
+	maxRow := max(0, len(grid)-rows)
+	maxCol := max(0, maxLen-cols)
 	selRow := -1
 	if awaiting {
 		selRow = findSelectorRow(grid)
 	}
 	if selRow >= 0 && selRow != s.view.SelRow {
-		s.view.Row = screen.AnchorRow(selRow, viewRows)
+		s.view.Row = screen.AnchorRow(selRow, rows)
 		s.view.Follow = false
 	}
 	s.view.SelRow = selRow
@@ -194,18 +209,18 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 	if selRow < 0 && s.view.Row >= maxRow {
 		s.view.Follow = true
 	}
-	lines := screen.WindowLines(grid, s.view, viewRows, s.cfg.WrapCols)
+	lines := screen.WindowLines(grid, s.view, rows, cols)
 
 	if len(s.input) > 0 {
-		composed := screen.WrapLine("> "+strings.ReplaceAll(s.input, "\n", " | "), s.cfg.WrapCols)
+		composed := screen.WrapLine("> "+strings.ReplaceAll(s.input, "\n", " | "), cols)
 		from := max(0, len(composed)-2)
 		for _, piece := range composed[from:] {
 			lines = append(lines, screen.Line{Text: piece, Color: screen.Colors.Prompt})
 		}
 		if g := input.Suggest(s.input, s.history); g != "" {
 			ghost := []rune(g)
-			if len(ghost) > s.cfg.WrapCols {
-				ghost = ghost[:s.cfg.WrapCols]
+			if len(ghost) > cols {
+				ghost = ghost[:cols]
 			}
 			lines = append(lines, screen.Line{Text: string(ghost), Color: screen.Colors.Dim})
 		}
@@ -214,11 +229,11 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	bar := fmt.Sprintf("%s  r%d/%d c%d", hint, s.view.Row, maxRow, s.view.Col)
+	bar := fmt.Sprintf("%s  r%d/%d c%d z%d", hint, s.view.Row, maxRow, s.view.Col, s.size)
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: "[" + s.cfg.Name + "] " + bar, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: "[" + s.cfg.Name + "] " + bar, size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;
@@ -226,7 +241,7 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 // so a keystroke echo never waits on a capture in flight.
 func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
-		return stateResult{lines: s.screenLines(noSession), status: "terminal gone"}
+		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", size: s.size}
 	}
 	grid, status := splitScreen(pane)
 	// Detect a prompt over the SAME blank-trimmed content the device shows (the
@@ -249,7 +264,7 @@ func gridTail(grid []screen.Line, status string) string {
 }
 
 func displayMessage(st stateResult) string {
-	b, _ := json.Marshal(screen.BuildDisplay(st.lines, st.status))
+	b, _ := json.Marshal(screen.BuildDisplay(st.lines, st.status, st.size))
 	return string(b)
 }
 
@@ -292,6 +307,12 @@ func (s *Server) applyKey(key string) {
 	switch a.Kind {
 	case "pan":
 		s.view = screen.PanViewport(s.view, a.Key)
+	case "zoom":
+		if a.Key == "in" {
+			s.size = min(sizeMax, s.size+1)
+		} else {
+			s.size = max(sizeMin, s.size-1)
+		}
 	case "send":
 		s.history = append(s.history, a.Text)
 		if len(s.history) > historyMax {

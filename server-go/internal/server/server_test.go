@@ -106,6 +106,48 @@ func TestComposeMirrorShowsInputBuffer(t *testing.T) {
 	}
 }
 
+func TestColsRowsScaleWithSize(t *testing.T) {
+	s := testServer() // WrapCols 20, viewRows 6, size 2 baseline
+	if s.cols() != 20 || s.rows() != 6 {
+		t.Fatalf("size2 got cols=%d rows=%d", s.cols(), s.rows())
+	}
+	s.size = 1
+	if s.cols() != 40 || s.rows() != 12 {
+		t.Fatalf("size1 got cols=%d rows=%d", s.cols(), s.rows())
+	}
+	s.size = 3
+	if s.cols() != 13 || s.rows() != 4 {
+		t.Fatalf("size3 got cols=%d rows=%d", s.cols(), s.rows())
+	}
+}
+
+func TestZoomInOutClamped(t *testing.T) {
+	s := testServer()
+	s.applyKey("ctrl+=") // zoom in: 2 -> 3
+	if s.size != 3 {
+		t.Fatalf("zoom in got %d", s.size)
+	}
+	s.applyKey("ctrl+=") // already max, stays 3
+	if s.size != 3 {
+		t.Fatalf("zoom in clamp got %d", s.size)
+	}
+	s.applyKey("ctrl+-") // 3 -> 2
+	s.applyKey("ctrl+-") // 2 -> 1
+	s.applyKey("ctrl+-") // already min, stays 1
+	if s.size != 1 {
+		t.Fatalf("zoom out clamp got %d", s.size)
+	}
+}
+
+func TestComposeMirrorCarriesSize(t *testing.T) {
+	s := testServer()
+	s.size = 3
+	st := s.composeMirror([]screen.Line{{Text: "x", Color: screen.Colors.Text}}, "", false)
+	if st.size != 3 {
+		t.Fatalf("size in stateResult got %d", st.size)
+	}
+}
+
 func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
 	s := testServer()
 	s.input = "git c"

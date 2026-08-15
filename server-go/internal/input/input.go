@@ -98,6 +98,12 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 			}
 			return quiet(mirror(ctx.History[idx], idx))
 		}
+		if base == "=" {
+			return Result{state, Action{Kind: "zoom", Key: "in"}}
+		}
+		if base == "-" {
+			return Result{state, Action{Kind: "zoom", Key: "out"}}
+		}
 		if len(base) == 1 {
 			return press(state, "ctrl+"+base)
 		}
