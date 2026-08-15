@@ -24,7 +24,7 @@ Current: **#8 E2E verification** — run the 10-item device checklist; fix failu
 > 🚀 **Deploy (end of Day 2)** — restart server; payload ≪15KB; idle CPU visibly down; behavior unchanged on device.
 
 **📅 Day 3 — 2026-08-16 · Any instance, comfortably**
-10. ⬜ **mDNS multi-server + server picker.** Server advertises `_cardputerme._tcp` (bonjour-service); device discovers + local numbered server list → server-side session picker (`0. change server`). Fallback: built-in host.
+10. ⬜ **CLI + discovery redesign (user-spec 2026-08-15).** Contract: `cardputerme [name]` is the whole story — **exposing a terminal = creating the WS server** (no separate start step, no "add session" command); device **auto-finds servers** via mDNS `_cardputerme._tcp` (bonjour-service), picker on-device, **no IP baked in firmware**. Settle first: (a) one server PER EXPOSURE, own port, dies with its terminal — recommended, flips the one-server invariant — vs (b) one daemon/machine + client invocations (`POST /select`, server.js:273). Fix the launcher gaps: foreground-hostage server, detached-sibling spawn, `tmux attach` hint leak. Full spec in tracker task #10.
 11. ⬜ **Zoom (server-owned font).** Display message gains `font`; device `setTextSize`; a ctrl-chord zooms; viewport dims derive from zoom.
 12. ⬜ **Processing status.** Prefer the tail row containing "esc to interrupt" (plain `.includes`) as status so Claude's live spinner/token line rides the marquee.
 13. ⬜ **History autosuggest + Tab accept.** While typing, ghost-render the newest history command matching the prefix (dim color); **Tab accepts** it (no suggestion → Tab passes to the terminal, server-decided). Avoids retyping repeated commands. Server-only, TDD.
