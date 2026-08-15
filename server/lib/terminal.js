@@ -1,24 +1,38 @@
 'use strict';
 
 // Terminal backend adapter — the ONE place that knows how to read/write a
-// terminal session. The bridge core (server.js) talks to this interface only, so
-// it never depends on tmux: today the backend is tmux, later a PTY-owned shell
-// can drop in with the same shape. An adapter exposes:
+// terminal session AND the only place that knows the backend's key spellings.
+// The core speaks GENERIC key names ('enter', 'escape', 'up', 'ctrl+c', '2');
+// this adapter translates them to tmux. Swap in another backend (a PTY) and
+// nothing outside this file changes. An adapter exposes:
 //
 //   exists()        -> Promise<boolean>   is the session live?
-//   capture()       -> Promise<string|null>  the visible screen text
+//   capture()       -> Promise<string|null>  the visible screen text (with ANSI)
 //   cwd()           -> Promise<string>    the session's working dir ('' if none)
 //   sendText(text)  -> Promise<boolean>   type text, then submit (Enter)
-//   sendKey(key)    -> Promise<boolean>   one literal keypress, no Enter
-//
-// (Named keys — Tab / Enter / Esc / arrows — are task #4; sendKey handles a
-// literal char today, e.g. answering a menu with its digit.)
+//   sendKey(key)    -> Promise<boolean>   one GENERIC keypress, no Enter
 
 const { execFile } = require('child_process');
 
-// Keys sent by NAME (not literally) — tmux `send-keys <Name>`. Anything else is
-// sent as a literal character with `-l`.
-const NAMED_KEYS = new Set(['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'BSpace', 'Space']);
+// Generic key name -> tmux named-key spelling. 'ctrl+<x>' maps to tmux 'C-<x>';
+// any other single character is sent literally (-l).
+const KEY_TO_TMUX = {
+  enter: 'Enter',
+  escape: 'Escape',
+  tab: 'Tab',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+  backspace: 'BSpace',
+  space: 'Space',
+};
+
+function tmuxKey(key) {
+  if (KEY_TO_TMUX[key]) return KEY_TO_TMUX[key];
+  if (key.startsWith('ctrl+') && key.length === 6) return 'C-' + key[5];
+  return null;   // literal character
+}
 
 // Default process runner -> { code, stdout, stderr }. Injectable so the backend
 // is unit-testable without spawning anything (tests pass a fake runner).
@@ -58,11 +72,12 @@ function tmuxBackend({ session, scrollbackLines = 200, runner = run, typeDelayMs
       if (typeDelayMs > 0) await new Promise((r) => setTimeout(r, typeDelayMs));
       return (await runner('tmux', ['send-keys', '-t', session, 'Enter'])).code === 0;
     },
-    // One keypress. Named keys (Escape/Enter/Tab/arrows…) go by name; any other
-    // key is a literal character (e.g. a lone digit answering a menu).
+    // One GENERIC keypress ('enter', 'up', 'ctrl+c', a literal char) — translated
+    // to the tmux spelling here and nowhere else.
     async sendKey(key) {
-      const args = NAMED_KEYS.has(key)
-        ? ['send-keys', '-t', session, key]
+      const named = tmuxKey(key);
+      const args = named
+        ? ['send-keys', '-t', session, named]
         : ['send-keys', '-t', session, '-l', key];
       return (await runner('tmux', args)).code === 0;
     },
@@ -70,8 +85,7 @@ function tmuxBackend({ session, scrollbackLines = 200, runner = run, typeDelayMs
 }
 
 // Enumerate the live tmux sessions by name — feeds the session registry so the
-// device can pick any running session. tmux-specific (a PTY backend would list
-// its own sessions differently); kept here in the backend layer, not the core.
+// device can pick any running session. tmux-specific; kept in the backend layer.
 async function listTmuxSessions(runner = run) {
   const { code, stdout } = await runner('tmux', ['list-sessions', '-F', '#{session_name}']);
   if (code !== 0) return [];

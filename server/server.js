@@ -71,14 +71,17 @@ let activeSessionName = DEFAULT_SESSION;
 // UI interaction state, driven entirely server-side by the input FSM (lib/input).
 // 'mirror' = showing a session; 'picker' = the numbered session menu. `input` is
 // the SERVER-owned compose buffer (the lazy device only forwards keys).
-let uiState = { mode: 'mirror', input: '' };
+let uiState = { mode: 'mirror', input: '', hist: null };
+// Sent-command history (newest last) — recalled with ctrl+;/ctrl+. like a shell.
+const history = [];
+const HISTORY_MAX = 50;
 
 // Server-owned omnidirectional viewport over the terminal's native-width grid.
 // The device forwards arrow keys; the server pans and sends only this window.
 const VIEW_ROWS = 6;             // fits the device body between header + status bar
 const VIEW_COLS = WRAP_COLS;     // device columns
 const PROMPT_TAIL_ROWS = 16;     // prompt detection scans ONLY the pane's tail
-let view = { row: 0, col: 0, follow: true };
+let view = { row: 0, col: 0, follow: true, selRow: -1 };
 
 function clamp(v, lo, hi) {
   if (v < lo) return lo;
@@ -228,10 +231,13 @@ function composeMirror(grid, status, awaiting) {
   for (const l of grid) { if (l.text.length > maxLen) maxLen = l.text.length; }
   const maxRow = Math.max(0, grid.length - VIEW_ROWS);
   const maxCol = Math.max(0, maxLen - VIEW_COLS);
-  // While a menu is up, keep the highlighted option centred in the window so
-  // navigating from the first to the last option always stays readable.
+  // While a menu is up, centre the highlighted option — but ONLY when the
+  // highlight actually moved, so the user can pan away (opt+arrows) to read the
+  // question/proposal without being yanked back on every refresh.
   const selRow = awaiting ? findSelectorRow(grid) : -1;
-  if (selRow >= 0) { view.row = selRow - ((VIEW_ROWS / 2) | 0); view.follow = false; }
+  const selMoved = selRow >= 0 && selRow !== view.selRow;
+  view.selRow = selRow;
+  if (selMoved) { view.row = selRow - ((VIEW_ROWS / 2) | 0); view.follow = false; }
   if (selRow < 0 && view.follow) view.row = maxRow;
   view.row = clamp(view.row, 0, maxRow);
   view.col = clamp(view.col, 0, maxCol);
@@ -321,24 +327,29 @@ async function pushIfChanged(force) {
 // This is the whole lazy-device contract: the server owns the input buffer and
 // every special function; the device only reported a keypress.
 async function applyKey(key) {
-  const { state, action } = interpretKey(uiState, key, { sessions: registry.names(), awaiting: lastAwaiting });
+  const { state, action } = interpretKey(uiState, key, { sessions: registry.names(), awaiting: lastAwaiting, history });
   uiState = state;
-  const term = activeTerminal();
-  if (action.kind === 'select') { activeSessionName = action.name; view = { row: 0, col: 0, follow: true }; }
-  if (action.kind === 'send') { view.follow = true; await term.sendText(action.text); }         // sending re-sticks auto-scroll
-  if (action.kind === 'pressEnter') { view.follow = true; await term.sendKey('Enter'); }
-  if (action.kind === 'pressTab') { view.follow = true; await term.sendKey('Tab'); }
-  if (action.kind === 'sendArrow') { view.follow = true; await term.sendKey(action.key); }      // drive the on-screen selector
-  if (action.kind === 'answerMenu') { view.follow = true; await term.sendKey(action.key); }
-  if (action.kind === 'pan') view = panViewport(view, action.key);
-  // Typing fast-path: buffer-only changes (char/backspace/newline) re-render
-  // from the cached grid — instant echo, no capture-pane per keystroke.
-  if (action.kind === 'none' && uiState.mode === 'mirror' && cachedMirror) {
+  if (action.kind === 'select') { activeSessionName = action.name; view = { row: 0, col: 0, follow: true, selRow: -1 }; }
+  if (action.kind === 'pan') view = Object.assign({}, view, panViewport(view, action.key));
+  if (action.kind === 'send') {
+    history.push(action.text);                                   // shell-style recall (ctrl+up)
+    if (history.length > HISTORY_MAX) history.shift();
+    view.follow = true;
+    await activeTerminal().sendText(action.text);                // sending re-sticks auto-scroll
+  }
+  // ONE keypress path: the FSM emits a GENERIC key; the adapter spells it.
+  if (action.kind === 'pressKey') {
+    view.follow = true;
+    await activeTerminal().sendKey(action.key);
+  }
+  // Fast-path: buffer-only changes AND pans re-render from the cached grid —
+  // instant echo, no capture-pane per keystroke (pans are the hottest keys).
+  const cacheOnly = action.kind === 'none' || action.kind === 'pan';
+  if (cacheOnly && uiState.mode === 'mirror' && cachedMirror) {
     broadcast(displayMessage(composeMirror(cachedMirror.grid, cachedMirror.status, cachedMirror.awaiting)));
     return;
   }
-  const touchedTerminal = action.kind === 'send' || action.kind === 'pressEnter' ||
-    action.kind === 'pressTab' || action.kind === 'sendArrow' || action.kind === 'answerMenu';
+  const touchedTerminal = action.kind === 'send' || action.kind === 'pressKey';
   setTimeout(() => pushIfChanged(true).catch(() => {}), touchedTerminal ? 250 : 0);
 }
 

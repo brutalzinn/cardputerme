@@ -74,11 +74,22 @@ test('sendKey() sends a literal char with -l (e.g. a menu digit)', async () => {
   assert.deepEqual(ok.calls[0].args, ['send-keys', '-t', 'S', '-l', '2']);
 });
 
-test('sendKey() sends a NAMED key (Escape) by name, without -l', async () => {
+// The core speaks GENERIC key names; ONLY this adapter knows tmux spellings.
+test('sendKey() translates generic ctrl+c to tmux C-c, without -l', async () => {
   const ok = fakeRunner([{ code: 0 }]);
   const t = tmuxBackend({ session: 'S', runner: ok });
-  assert.equal(await t.sendKey('Escape'), true);
-  assert.deepEqual(ok.calls[0].args, ['send-keys', '-t', 'S', 'Escape']);
+  assert.equal(await t.sendKey('ctrl+c'), true);
+  assert.deepEqual(ok.calls[0].args, ['send-keys', '-t', 'S', 'C-c']);
+});
+
+test('sendKey() translates generic named keys to tmux spellings, without -l', async () => {
+  const cases = [['escape', 'Escape'], ['enter', 'Enter'], ['tab', 'Tab'], ['up', 'Up']];
+  for (const [generic, tmuxName] of cases) {
+    const ok = fakeRunner([{ code: 0 }]);
+    const t = tmuxBackend({ session: 'S', runner: ok });
+    assert.equal(await t.sendKey(generic), true);
+    assert.deepEqual(ok.calls[0].args, ['send-keys', '-t', 'S', tmuxName]);
+  }
 });
 
 test('listTmuxSessions() lists session names, dropping blanks', async () => {

@@ -191,7 +191,12 @@ void drawBody() {
   drawScrollbar();
 }
 
-// Bottom status bar (always shown) — server-composed text, clipped to one line.
+// Bottom status bar (always shown) — server-composed text. Long text MARQUEES
+// (slides left in a loop) so the full line — e.g. token usage — stays readable
+// without any scrolling. Pure presentation; the server owns the content.
+int g_statusOffset = 0;
+unsigned long g_statusTick = 0;
+
 void drawStatusBar() {
   auto& d = M5Cardputer.Display;
   int y0 = SCR_H - STATUS_H;
@@ -199,10 +204,28 @@ void drawStatusBar() {
   d.setTextSize(1);
   d.setTextColor(g_statusColor, COL_HDR);
   d.setCursor(3, y0 + 4);
-  String s = g_status;
   const int maxChars = 39;                 // ~6px/char at size 1 across 240px
-  if ((int)s.length() > maxChars) s = s.substring(0, maxChars);
-  d.print(s);
+  String s = g_status;
+  if ((int)s.length() <= maxChars) { d.print(s); return; }
+  // Marquee window: wrap around with a gap so the start is easy to spot.
+  String loop = s + "   ";
+  int n = loop.length();
+  int off = g_statusOffset % n;
+  String win = loop.substring(off);
+  if ((int)win.length() < maxChars) win += loop.substring(0, maxChars - win.length());
+  if ((int)win.length() > maxChars) win = win.substring(0, maxChars);
+  d.print(win);
+}
+
+// Advance the marquee a step at a time (called from loop()).
+void tickStatusMarquee() {
+  const int maxChars = 39;
+  if ((int)g_status.length() <= maxChars) return;
+  unsigned long now = millis();
+  if (now - g_statusTick < 300) return;    // ~3 chars/second
+  g_statusTick = now;
+  g_statusOffset++;
+  drawStatusBar();
 }
 
 // No local input UI: the SERVER owns the compose buffer and renders it into the
@@ -229,7 +252,9 @@ void beep(bool question) {
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
   JsonObject status = doc["status"];
-  g_status = String((const char*)(status["text"] | ""));
+  String newStatus = String((const char*)(status["text"] | ""));
+  if (newStatus != g_status) g_statusOffset = 0;   // new text -> marquee restarts
+  g_status = newStatus;
   g_statusColor = (uint16_t)((uint32_t)(status["color"] | (uint32_t)COL_ACCENT));
 
   int prevPage = g_page, prevPages = pageCount();
@@ -296,15 +321,32 @@ void sendKey(const char* key) {
 // ------------------------------------------------------------------ input
 // LAZY DEVICE: every keypress is forwarded raw; the SERVER owns the input
 // buffer, esc behaviour, menus — everything. The device decides nothing.
-//   fn + ; . , /  -> up / down / left / right (pan the server viewport)
-//   `esc` (`)     -> "esc"      Enter -> "enter"   Shift+Enter -> "shift+enter"
-//   del           -> "backspace"        any char -> itself
+// ONE arrow table + ONE uniform modifier rule:
+//   the ; . , / cluster is "up/down/left/right" under ANY modifier (fn / opt /
+//   ctrl), sent as "<mod>+<arrow>" (bare fn = the arrow itself);
+//   ctrl+<other char> -> "ctrl+<char>"; shift+esc -> "shift+esc";
+//   `esc` (`) -> "esc"; enter/shift+enter/del/tab -> named; chars -> themselves.
+const char* arrowFor(char c) {
+  if (c == ';') return "up";
+  if (c == '.') return "down";
+  if (c == ',') return "left";
+  if (c == '/') return "right";
+  return nullptr;
+}
+
 void handleKeys(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
-    if (st.fn && c == ';') { sendKey("up");    continue; }
-    if (st.fn && c == '.') { sendKey("down");  continue; }
-    if (st.fn && c == ',') { sendKey("left");  continue; }
-    if (st.fn && c == '/') { sendKey("right"); continue; }
+    const char* arrow = arrowFor(c);
+    if (arrow && st.fn) { sendKey(arrow); continue; }
+    if (arrow && st.opt) { sendKey((String("opt+") + arrow).c_str()); continue; }
+    if (arrow && st.ctrl) { sendKey((String("ctrl+") + arrow).c_str()); continue; }
+    if (st.ctrl) {
+      char combo[8] = { 'c', 't', 'r', 'l', '+', c, 0 };
+      sendKey(combo);
+      continue;
+    }
+    // shift+esc -> stop the agent (shifted backtick may arrive as '~')
+    if (st.shift && (c == '`' || c == '~')) { sendKey("shift+esc"); continue; }
     if (c == '`') { sendKey("esc"); continue; }
     char one[2] = { c, 0 };
     sendKey(one);
@@ -346,6 +388,8 @@ void loop() {
   bool toastShowing = (millis() < toastUntil) && toast.length();
   if (toastWasShown && !toastShowing) drawHeader();
   toastWasShown = toastShowing;
+
+  tickStatusMarquee();                     // slide long status text (token usage etc.)
 
   delay(5);
 }

@@ -2,20 +2,31 @@
 
 // Pure interaction FSM — the LAZY-DEVICE contract. The device forwards every raw
 // key; the SERVER owns the input buffer, all special functions and what reaches
-// the terminal. No regex, no else.
+// the terminal. Keys and actions use GENERIC names only — no backend (tmux)
+// spelling here; the terminal adapter translates. No regex, no else.
 //
-// State: { mode: 'mirror' | 'picker', input: string }
-// Keys:  single chars, plus named: enter, shift+enter, backspace, esc,
-//        up, down, left, right.
+// State: { mode: 'mirror' | 'picker', input: string, hist: number|null }
+// Keys:  single chars, arrows (up/down/left/right), enter, backspace, tab, esc,
+//        and modifier chords as '<mod>+<base>' (shift+enter, shift+esc,
+//        ctrl+<char>, ctrl+up/down, opt+<arrow>).
+//
+// Actions: none | send{text} | pressKey{key} | pan{key} | select{name}
+//        | openPicker | closePicker
 //
 //   mirror:
 //     char        -> append to the input buffer (digit answers a menu when
-//                    awaiting and the buffer is empty)
+//                    awaiting and the buffer is empty -> pressKey digit)
 //     backspace   -> delete last char
 //     shift+enter -> append '\n' (compose multi-line)
-//     enter       -> send the buffer (empty buffer -> press Enter in terminal)
+//     enter       -> send the buffer (empty buffer -> pressKey enter)
+//     tab         -> pressKey tab (selector auto-advance / completion)
 //     esc         -> typing? CLEAR the input : open the session picker
-//     arrows      -> pan the viewport (input kept)
+//     shift+esc   -> pressKey escape (STOP the agent; draft kept)
+//     ctrl+up/dn  -> history recall prev / next (shell idiom)
+//     ctrl+<char> -> pressKey ctrl+<char> (Ctrl+C & co.)
+//     arrows      -> awaiting & not typing: up/down pressKey (drive the
+//                    selector), left/right pan; otherwise pan
+//     opt+<arrow> -> ALWAYS pan (read around, even while a selector is up)
 //   picker:
 //     number      -> select that session, back to mirror
 //     esc         -> cancel back to mirror
@@ -38,48 +49,84 @@ function pickIndex(text, n) {
 }
 
 const ARROWS = new Set(['up', 'down', 'left', 'right']);
-// tmux named-key spelling for each arrow (sent INTO the terminal when a prompt
-// selector is up — e.g. Claude Code's AskUserQuestion panel).
-const ARROW_NAME = { up: 'Up', down: 'Down', left: 'Left', right: 'Right' };
+
+// Split '<mod>+<base>' once — the single modifier parse for the whole FSM.
+function splitMod(k) {
+  const i = k.indexOf('+');
+  if (i <= 0) return { mod: '', base: k };
+  return { mod: k.slice(0, i), base: k.slice(i + 1) };
+}
+
+const press = (state, key) => ({ state, action: { kind: 'pressKey', key } });
+const quiet = (state) => ({ state, action: { kind: 'none' } });
 
 function interpretKey(state, key, ctx) {
   const mode = (state && state.mode) || 'mirror';
   const input = (state && state.input) || '';
+  const hist = state && typeof state.hist === 'number' ? state.hist : null;
   const k = String(key == null ? '' : key);
   const sessions = (ctx && ctx.sessions) || [];
   const awaiting = !!(ctx && ctx.awaiting);
+  const history = (ctx && ctx.history) || [];
+  const mirror = (newInput, newHist = null) => ({ mode: 'mirror', input: newInput, hist: newHist });
 
   if (mode === 'picker') {
-    if (k === 'esc') return { state: { mode: 'mirror', input }, action: { kind: 'closePicker' } };
+    if (k === 'esc') return { state: mirror(input), action: { kind: 'closePicker' } };
     const n = pickIndex(k, sessions.length);
-    if (n > 0) return { state: { mode: 'mirror', input }, action: { kind: 'select', name: sessions[n - 1] } };
-    return { state, action: { kind: 'none' } };
+    if (n > 0) return { state: mirror(input), action: { kind: 'select', name: sessions[n - 1] } };
+    return quiet(state);
   }
 
-  // mirror
+  // mirror — parse any modifier chord exactly once.
+  const { mod, base } = splitMod(k);
+
+  if (mod === 'shift') {
+    if (base === 'esc') return press(state, 'escape');                    // STOP the agent; draft kept
+    if (base === 'enter') return quiet(mirror(input + '\n', hist));      // compose multi-line
+    return quiet(state);
+  }
+  if (mod === 'ctrl') {
+    if (base === 'up') {                                                  // history prev (shell idiom)
+      if (history.length === 0) return quiet(state);
+      const idx = hist === null ? history.length - 1 : Math.max(0, hist - 1);
+      return quiet(mirror(history[idx], idx));
+    }
+    if (base === 'down') {                                                // history next
+      if (hist === null) return quiet(state);
+      const idx = hist + 1;
+      if (idx >= history.length) return quiet(mirror(''));
+      return quiet(mirror(history[idx], idx));
+    }
+    if (base.length === 1) return press(state, 'ctrl+' + base);           // Ctrl+C & co.
+    return quiet(state);
+  }
+  if (mod === 'opt') {
+    if (ARROWS.has(base)) return { state, action: { kind: 'pan', key: base } };  // always read around
+    return quiet(state);
+  }
+
   if (k === 'esc') {
-    if (input.length > 0) return { state: { mode: 'mirror', input: '' }, action: { kind: 'none' } };
-    return { state: { mode: 'picker', input }, action: { kind: 'openPicker' } };
+    if (input.length > 0) return quiet(mirror(''));                       // clear (also drops recall)
+    return { state: { mode: 'picker', input, hist: null }, action: { kind: 'openPicker' } };
   }
   if (k === 'enter') {
-    if (input.length > 0) return { state: { mode: 'mirror', input: '' }, action: { kind: 'send', text: input } };
-    return { state, action: { kind: 'pressEnter' } };
+    if (input.length > 0) return { state: mirror(''), action: { kind: 'send', text: input } };
+    return press(state, 'enter');
   }
-  if (k === 'shift+enter') return { state: { mode: 'mirror', input: input + '\n' }, action: { kind: 'none' } };
-  if (k === 'backspace') return { state: { mode: 'mirror', input: input.slice(0, -1) }, action: { kind: 'none' } };
-  if (k === 'tab') return { state, action: { kind: 'pressTab' } };
+  if (k === 'backspace') return quiet(mirror(input.slice(0, -1), hist));
+  if (k === 'tab') return press(state, 'tab');
   if (ARROWS.has(k)) {
     // A prompt selector is on screen and the user isn't typing: up/down DRIVE it;
     // left/right keep panning so wide options stay readable.
     const vertical = k === 'up' || k === 'down';
-    if (awaiting && vertical && input.length === 0) return { state, action: { kind: 'sendArrow', key: ARROW_NAME[k] } };
+    if (awaiting && vertical && input.length === 0) return press(state, k);
     return { state, action: { kind: 'pan', key: k } };
   }
   if (k.length === 1) {
-    if (awaiting && input.length === 0 && isDigits(k)) return { state, action: { kind: 'answerMenu', key: k } };
-    return { state: { mode: 'mirror', input: input + k }, action: { kind: 'none' } };
+    if (awaiting && input.length === 0 && isDigits(k)) return press(state, k);   // answer a menu
+    return quiet(mirror(input + k, hist));
   }
-  return { state, action: { kind: 'none' } };
+  return quiet(state);
 }
 
 module.exports = { interpretKey, isDigits, pickIndex };
