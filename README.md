@@ -27,20 +27,19 @@ The device is a thin renderer: the server owns the input buffer, history, viewpo
 
 ## Install
 
-**Requirements:** Go ≥ 1.22 (the launcher builds the server on first run) and `tmux` (`brew install tmux`) — the invisible capture backend; you never interact with it directly.
+**Requirements:** Go ≥ 1.26 (the launcher builds the server on first run) and `tmux` (`brew install tmux`) — the invisible capture backend; you never interact with it directly.
 
 ```
 git clone <repo> && cd cardputerme
+make setup     # fetch Go deps + create firmware/.env from the template
 echo "alias cardputerme=\"$PWD/bin/cardputer-server\"" >> ~/.zshrc && source ~/.zshrc
 ```
 
-**Flash the Cardputer once.** Copy the env template, add your Wi-Fi, and upload:
+**Flash the Cardputer once.** Set your Wi-Fi in the `.env` that `make setup` created, then upload:
 
 ```
-cp firmware/cardputer/.env.example firmware/cardputer/.env
 # edit firmware/cardputer/.env → set WIFI_SSID and WIFI_PASS
-cd firmware/cardputer
-pio run -e cardputer-adv -t upload
+make flash     # build + upload the firmware to the Cardputer
 ```
 
 The Cardputer and your computer must be on the **same Wi-Fi network** (the beacon is a LAN broadcast).
@@ -154,7 +153,7 @@ make flash      # upload firmware to the Cardputer
 Or drive the server directly:
 
 ```
-cd server-go && go test ./...     # 71 tests, 4 packages
+cd server-go && go test ./...     # 72 tests, 4 packages
 go vet ./...
 ```
 
