@@ -83,6 +83,35 @@ Re-running the same name just says "already exposed". Each exposure prints a log
 
 ---
 
+## Running Claude Code (or any long-lived program)
+
+Every exposure is a **persistent tmux session**, so anything you start in it keeps running when you close your laptop lid or walk away — and you can watch and steer it from the Cardputer. This is the point of the project: kick off [Claude Code](https://claude.com/claude-code) (or an agent, a long build, a REPL) at your desk, then monitor and nudge it from your pocket.
+
+**Start it from the Cardputer** — the simplest way:
+
+```
+cd ~/my-project
+cardputerme                # expose this dir
+```
+
+Connect on the device, type `claude`, press Enter. Claude Code now runs in the exposed session and you drive it entirely from the Cardputer — answer its permission prompts with the **number keys**, interrupt with **Shift+esc**, scroll its output with **fn+arrows**.
+
+**Start it at your desk, then follow it from your pocket** — the power move. Because the exposure is a real tmux session, you can attach to the *same* session on your computer:
+
+```
+cd ~/my-project
+cardputerme                # exposes tmux session "my-project"
+tmux attach -t my-project  # attach on your computer (name = the exposure name)
+claude                     # run Claude Code here
+# ...work at your desk, then Ctrl-b d to detach — it keeps running
+```
+
+Now your desk screen **and** the Cardputer mirror the same live session — type from either. Detach at your desk (`Ctrl-b d`), pick up your Cardputer, and keep answering Claude's questions and watching its progress while you're away from the keyboard. (`Ctrl-b` is tmux's prefix; `d` detaches.)
+
+> You never *need* tmux for basic use — `cardputerme` manages the session for you and the Cardputer never shows it. Attaching is only for the dual-drive "desk + pocket" workflow above.
+
+---
+
 ## Layout
 
 ```
