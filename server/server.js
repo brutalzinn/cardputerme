@@ -69,15 +69,16 @@ function makeBackend(session) {
 }
 let activeSessionName = DEFAULT_SESSION;
 // UI interaction state, driven entirely server-side by the input FSM (lib/input).
-// 'mirror' = showing a session; 'picker' = showing the numbered session menu.
-let uiState = { mode: 'mirror' };
+// 'mirror' = showing a session; 'picker' = the numbered session menu. `input` is
+// the SERVER-owned compose buffer (the lazy device only forwards keys).
+let uiState = { mode: 'mirror', input: '' };
 
 // Server-owned omnidirectional viewport over the terminal's native-width grid.
 // The device forwards arrow keys; the server pans and sends only this window.
 const VIEW_ROWS = 6;             // fits the device body between header + status bar
 const VIEW_COLS = WRAP_COLS;     // device columns
+const PROMPT_TAIL_ROWS = 16;     // prompt detection scans ONLY the pane's tail
 let view = { row: 0, col: 0, follow: true };
-let escTimer = null;   // pending single-esc (debounced to detect a double-esc)
 
 function clamp(v, lo, hi) {
   if (v < lo) return lo;
@@ -189,24 +190,62 @@ async function buildState() {
     return { lines: screenLines(NO_SESSION), status: 'no active session', sessionExists: false, awaiting: false };
   }
   const pane = await term.capture();          // includes ANSI colour escapes (-e)
-  const prompt = detectPrompt(stripAnsi(pane)); // detection runs on plain text
-  if (prompt) {
-    return { lines: screenLines(prompt), status: `[${activeSessionName}] answer the prompt`, sessionExists: true, awaiting: true };
-  }
-  // Mirror: a native-width coloured grid + the status. The server-owned viewport
-  // pans over the grid (arrow keys); we send only the visible window.
+
+  // Prompt detection — TAIL ONLY, and it never takes over the screen. A real
+  // interactive prompt sits at the BOTTOM of a terminal; numbered lists in older
+  // output must not trigger it (false positives). `awaiting` only means: beep,
+  // status hint, and a lone digit answers — the mirror itself stays untouched,
+  // with the terminal's own colours. Nice, unbreakable Claude Code integration.
+  const plain = stripAnsi(pane);
+  const tail = plain.split('\n').slice(-PROMPT_TAIL_ROWS).join('\n');
+  const awaiting = detectPrompt(tail) !== null;
+
+  // Mirror: a native-width coloured grid + the status. Cache it so buffer-only
+  // keystrokes can re-render instantly without another capture (typing fast-path).
   const { grid, status } = splitScreen(pane);
+  cachedMirror = { grid, status, awaiting };
+  return composeMirror(grid, status, awaiting);
+}
+
+// Compose the mirror display from a grid + status: apply the server-owned
+// viewport (pan/follow) and render the compose buffer. Pure w.r.t. the pane —
+// usable from the cache for instant keystroke echo.
+let cachedMirror = null;
+
+// The selector row of an on-screen menu: the line whose text starts with the
+// selection pointer ('>' — toAscii maps ❯/▶ to it) followed by a numbered
+// option. Lets the viewport TRACK the highlight while the user navigates.
+function findSelectorRow(grid) {
+  for (let i = grid.length - 1; i >= 0; i--) {
+    const t = grid[i].text.trim();
+    if (t.startsWith('>') && parseChoices(t.slice(1)).length > 0) return i;
+  }
+  return -1;
+}
+
+function composeMirror(grid, status, awaiting) {
   let maxLen = 0;
   for (const l of grid) { if (l.text.length > maxLen) maxLen = l.text.length; }
   const maxRow = Math.max(0, grid.length - VIEW_ROWS);
   const maxCol = Math.max(0, maxLen - VIEW_COLS);
-  if (view.follow) view.row = maxRow;
+  // While a menu is up, keep the highlighted option centred in the window so
+  // navigating from the first to the last option always stays readable.
+  const selRow = awaiting ? findSelectorRow(grid) : -1;
+  if (selRow >= 0) { view.row = selRow - ((VIEW_ROWS / 2) | 0); view.follow = false; }
+  if (selRow < 0 && view.follow) view.row = maxRow;
   view.row = clamp(view.row, 0, maxRow);
   view.col = clamp(view.col, 0, maxCol);
-  if (view.row >= maxRow) view.follow = true;   // back at the bottom -> follow again
+  if (selRow < 0 && view.row >= maxRow) view.follow = true;   // back at the bottom -> follow again
   const lines = windowLines(grid, view, { rows: VIEW_ROWS, cols: VIEW_COLS });
-  const bar = `${status}  r${view.row}/${maxRow} c${view.col}`;
-  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${bar}`, sessionExists: true, awaiting: false };
+  // The SERVER-owned compose buffer, rendered into the display (lazy device):
+  // the last wrapped pieces of what the user is typing, in the prompt colour.
+  if (uiState.input.length > 0) {
+    const composed = wrapLine('> ' + uiState.input.split('\n').join(' | '), VIEW_COLS);
+    for (const piece of composed.slice(-2)) lines.push({ text: piece, color: COLORS.prompt });
+  }
+  const hint = awaiting ? 'PROMPT: press a number' : status;
+  const bar = `${hint}  r${view.row}/${maxRow} c${view.col}`;
+  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${bar}`, sessionExists: true, awaiting };
 }
 
 // ---- HTTP (debugging only) -------------------------------------------------
@@ -274,31 +313,33 @@ async function pushIfChanged(force) {
   }
   const freshQuestion = st.awaiting && !lastAwaiting; // a choose-one prompt appeared on screen
   if (NOTIFY && freshQuestion) broadcast(JSON.stringify({ type: 'notify', reason: 'question' }));
+  if (!st.awaiting && lastAwaiting) view.follow = true; // prompt answered -> resume following output
   lastAwaiting = st.awaiting;
 }
 
-// Esc is handled entirely server-side (the device just forwards the key). A
-// quick DOUBLE esc opens the session picker; a single esc (after a short debounce
-// to rule out a double) sends a real Escape to the terminal — like any terminal.
-function handleEsc() {
-  if (uiState.mode === 'picker') {           // esc in the picker cancels back to mirror
-    uiState = { mode: 'mirror' };
-    if (escTimer) { clearTimeout(escTimer); escTimer = null; }
-    pushIfChanged(true).catch(() => {});
+// Route ONE raw key through the pure FSM (lib/input) and execute its action.
+// This is the whole lazy-device contract: the server owns the input buffer and
+// every special function; the device only reported a keypress.
+async function applyKey(key) {
+  const { state, action } = interpretKey(uiState, key, { sessions: registry.names(), awaiting: lastAwaiting });
+  uiState = state;
+  const term = activeTerminal();
+  if (action.kind === 'select') { activeSessionName = action.name; view = { row: 0, col: 0, follow: true }; }
+  if (action.kind === 'send') { view.follow = true; await term.sendText(action.text); }         // sending re-sticks auto-scroll
+  if (action.kind === 'pressEnter') { view.follow = true; await term.sendKey('Enter'); }
+  if (action.kind === 'pressTab') { view.follow = true; await term.sendKey('Tab'); }
+  if (action.kind === 'sendArrow') { view.follow = true; await term.sendKey(action.key); }      // drive the on-screen selector
+  if (action.kind === 'answerMenu') { view.follow = true; await term.sendKey(action.key); }
+  if (action.kind === 'pan') view = panViewport(view, action.key);
+  // Typing fast-path: buffer-only changes (char/backspace/newline) re-render
+  // from the cached grid — instant echo, no capture-pane per keystroke.
+  if (action.kind === 'none' && uiState.mode === 'mirror' && cachedMirror) {
+    broadcast(displayMessage(composeMirror(cachedMirror.grid, cachedMirror.status, cachedMirror.awaiting)));
     return;
   }
-  if (escTimer) {                            // second esc within the window -> picker
-    clearTimeout(escTimer);
-    escTimer = null;
-    uiState = { mode: 'picker' };
-    pushIfChanged(true).catch(() => {});
-    return;
-  }
-  escTimer = setTimeout(() => {              // no second esc -> single -> Escape to terminal
-    escTimer = null;
-    activeTerminal().sendKey('Escape')
-      .finally(() => setTimeout(() => pushIfChanged(true).catch(() => {}), 200));
-  }, 350);
+  const touchedTerminal = action.kind === 'send' || action.kind === 'pressEnter' ||
+    action.kind === 'pressTab' || action.kind === 'sendArrow' || action.kind === 'answerMenu';
+  setTimeout(() => pushIfChanged(true).catch(() => {}), touchedTerminal ? 250 : 0);
 }
 
 wss.on('connection', async (ws, req) => {
@@ -325,15 +366,9 @@ wss.on('connection', async (ws, req) => {
       pushIfChanged(true).catch(() => {});
       return;
     }
-    // Named keys, all interpreted server-side. Esc -> handleEsc (Escape / picker);
-    // arrows -> pan the viewport (mirror mode) for omnidirectional reading.
+    // Every raw key goes through the FSM (lazy device: the server owns input).
     if (m.type === 'key' && typeof m.key === 'string') {
-      const key = m.key;
-      if (key === 'esc') { handleEsc(); return; }
-      if (uiState.mode === 'mirror') {
-        view = panViewport(view, key);
-        pushIfChanged(true).catch(() => {});
-      }
+      await applyKey(m.key);
       return;
     }
     // Ask for the current session list.
@@ -342,23 +377,11 @@ wss.on('connection', async (ws, req) => {
       ws.send(sessionsMessage());
       return;
     }
-    // Send input to the active session. A lone digit picks a menu option (no
-    // Enter — the CLI's selector acts on the keypress); anything else is typed +
-    // submitted. Single-digit test is a plain char check (no regex).
-    // Every key the device forwards is interpreted HERE (server-side) by the
-    // pure FSM (lib/input) — the device special-cases nothing. Backtick is Esc:
-    // `=Escape to the terminal, ``=open picker; in the picker a number selects a
-    // session. Otherwise a digit answers an on-screen menu, or text is typed.
+    // Legacy whole-text command (older firmware's local input mode): feed each
+    // char through the FSM, then press enter — same one path, no special case.
     if (m.type === 'cmd' && typeof m.text === 'string') {
-      const { state, action } = interpretKey(uiState, m.text, { sessions: registry.names(), awaiting: lastAwaiting });
-      uiState = state;
-      const term = activeTerminal();
-      if (action.kind === 'select') activeSessionName = action.name;
-      if (action.kind === 'escape') await term.sendKey('Escape');
-      if (action.kind === 'answerMenu') await term.sendKey(action.key);
-      if (action.kind === 'type') await term.sendText(action.text);
-      // openPicker / closePicker / select / none: buildState reflects uiState below.
-      setTimeout(() => pushIfChanged(true).catch(() => {}), 300);
+      for (const c of m.text) await applyKey(c === '\n' ? 'shift+enter' : c);
+      await applyKey('enter');
       return;
     }
   });

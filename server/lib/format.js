@@ -15,6 +15,7 @@ function toAscii(s) {
     .replace(/[–—−]/g, '-')  // – — −   -> -
     .replace(/…/g, '...')              // …       -> ...
     .replace(/[•·]/g, '*')        // • ·     -> *
+    .replace(/[❯▶›]/g, '>')       // selection pointer -> '>' (must stay visible)
     .replace(/[→⇒]/g, '->')       // → ⇒     -> ->
     .replace(/[←⇐]/g, '<-')       // ← ⇐     -> <-
     .replace(/[✓✔]/g, 'v')        // ✓ ✔     -> v

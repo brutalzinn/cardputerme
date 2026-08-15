@@ -56,7 +56,6 @@ const int   WRAP_COLS = ENV_WRAP_COLS;
 #define SCR_H       135
 #define HEADER_H    14        // top status bar height
 #define STATUS_H    16        // bottom status bar height
-#define INPUT_H     52        // command entry region height (INPUT mode; auto multi-line)
 #define LINE_H      16        // size-2 font line height (12x16 px glyphs)
 #define SBAR_W      3         // right-edge scroll indicator width
 
@@ -70,9 +69,6 @@ const int   WRAP_COLS = ENV_WRAP_COLS;
 #define COL_OK      0x07E6    // green — wifi ok / toast
 #define COL_WARN    0xFD20    // orange — no wifi / errors
 
-// NOTE: don't use bare INPUT/OUTPUT here — reserved Arduino GPIO macros.
-enum Mode { MODE_VIEW, MODE_INPUT };
-Mode mode = MODE_VIEW;
 
 // The server sends body lines (each with its own color) + a status string.
 struct Line { String text; uint16_t color; };
@@ -89,7 +85,6 @@ bool follow = true;
 WebSocketsClient webSocket;
 bool wsConnected = false;
 
-String inputBuf = "";
 String toast = "";
 unsigned long toastUntil = 0;
 
@@ -102,7 +97,7 @@ void showToast(const String& msg, uint16_t ms = 1200) {
 bool wifiUp() { return WiFi.status() == WL_CONNECTED; }
 
 int bodyBottom() {
-  return SCR_H - STATUS_H - (mode == MODE_INPUT ? INPUT_H : 0);
+  return SCR_H - STATUS_H;
 }
 int linesPerPage() {
   int n = (bodyBottom() - HEADER_H) / LINE_H;
@@ -141,7 +136,7 @@ void drawHeader() {
   d.setCursor(3, 4);
   d.print(wifiUp() ? "WiFi" : "NoWiFi");
   d.setTextColor(COL_ACCENT, COL_HDR);
-  d.print(mode == MODE_INPUT ? " CMD" : " VIEW");
+  d.print(wsConnected ? " LIVE" : " ....");
 
   if (millis() < toastUntil && toast.length()) {
     d.setTextColor(COL_OK, COL_HDR);
@@ -210,44 +205,12 @@ void drawStatusBar() {
   d.print(s);
 }
 
-// Command entry region above the status bar (INPUT mode). Auto multi-line: the
-// text word/char-wraps as it grows, so big messages that can't fit one line
-// are shown across several lines (newest lines kept).
-void drawInputBar() {
-  auto& d = M5Cardputer.Display;
-  int y0 = SCR_H - STATUS_H - INPUT_H;
-  d.fillRect(0, y0, SCR_W, INPUT_H, COL_HDR);
-  d.setTextSize(2);
-  d.setTextColor(COL_ACCENT, COL_HDR);
-
-  // Wrap the buffer (explicit \n from Shift+Enter, plus width wrapping) into lines.
-  const int cols = 19;
-  std::vector<String> lines;
-  String cur = "";
-  for (int i = 0; i < (int)inputBuf.length(); i++) {
-    char ch = inputBuf[i];
-    if (ch == '\n') { lines.push_back(cur); cur = ""; continue; }
-    cur += ch;
-    if ((int)cur.length() >= cols) { lines.push_back(cur); cur = ""; }
-  }
-  lines.push_back(cur + "_");               // cursor on the last line
-
-  const int maxLines = INPUT_H / LINE_H;    // how many fit in the region
-  int start = (int)lines.size() > maxLines ? (int)lines.size() - maxLines : 0;
-  int y = y0 + 2;
-  for (int i = start; i < (int)lines.size(); i++) {
-    d.setCursor(2, y);
-    if (i == start) d.print(">");
-    d.print(lines[i]);
-    y += LINE_H;
-  }
-}
-
+// No local input UI: the SERVER owns the compose buffer and renders it into the
+// display message (lazy device — display things only).
 void redraw() {
   drawHeader();
   drawBody();
   drawStatusBar();
-  if (mode == MODE_INPUT) drawInputBar();
 }
 
 // ------------------------------------------------------------------ network
@@ -318,18 +281,6 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
-// Send a typed command up to the server over the same socket.
-void sendCommand(const String& text) {
-  if (!wsConnected) { showToast("No link"); redraw(); return; }
-  JsonDocument doc;
-  doc["type"] = "cmd";
-  doc["text"] = text;
-  String body;
-  serializeJson(doc, body);
-  webSocket.sendTXT(body);
-  showToast("Sent");
-}
-
 // Forward a NAMED key (arrows, etc.) for the SERVER to interpret — e.g. panning
 // the viewport. The device decides nothing; it just reports the key.
 void sendKey(const char* key) {
@@ -343,47 +294,25 @@ void sendKey(const char* key) {
 }
 
 // ------------------------------------------------------------------ input
-void handleViewKey(const Keyboard_Class::KeysState& st) {
+// LAZY DEVICE: every keypress is forwarded raw; the SERVER owns the input
+// buffer, esc behaviour, menus — everything. The device decides nothing.
+//   fn + ; . , /  -> up / down / left / right (pan the server viewport)
+//   `esc` (`)     -> "esc"      Enter -> "enter"   Shift+Enter -> "shift+enter"
+//   del           -> "backspace"        any char -> itself
+void handleKeys(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
-    // Cardputer arrow cluster -> forward for the SERVER to pan the viewport
-    // (omnidirectional reading of wide / multi-line text).
-    if (c == ';') { sendKey("up");    return; }
-    if (c == '.') { sendKey("down");  return; }
-    if (c == ',') { sendKey("left");  return; }
-    if (c == '/') { sendKey("right"); return; }
-    if (c == '`') { sendKey("esc");   return; }   // esc key -> server handles (Escape / picker)
-    // any other key -> start composing a command
-    mode = MODE_INPUT;
-    inputBuf = "";
-    inputBuf += c;
-    redraw();
-    return;
+    if (st.fn && c == ';') { sendKey("up");    continue; }
+    if (st.fn && c == '.') { sendKey("down");  continue; }
+    if (st.fn && c == ',') { sendKey("left");  continue; }
+    if (st.fn && c == '/') { sendKey("right"); continue; }
+    if (c == '`') { sendKey("esc"); continue; }
+    char one[2] = { c, 0 };
+    sendKey(one);
   }
-}
-
-void handleInputKey(const Keyboard_Class::KeysState& st) {
-  bool changed = false;
-  for (char c : st.word) {
-    inputBuf += c;
-    changed = true;
-  }
-  if (st.del && inputBuf.length()) {      // backspace
-    inputBuf.remove(inputBuf.length() - 1);
-    changed = true;
-  }
-  if (st.enter && st.shift) {             // Shift+Enter = newline (compose multi-line)
-    inputBuf += '\n';
-    changed = true;
-  }
-  if (st.enter && !st.shift) {            // Enter = confirm/SEND
-    String cmd = inputBuf;
-    inputBuf = "";
-    mode = MODE_VIEW;
-    sendCommand(cmd);
-    redraw();
-    return;
-  }
-  if (changed) drawInputBar();
+  if (st.del) sendKey("backspace");
+  if (st.tab) sendKey("tab");
+  if (st.enter && st.shift) sendKey("shift+enter");
+  if (st.enter && !st.shift) sendKey("enter");
 }
 
 // ------------------------------------------------------------------ Arduino
@@ -410,9 +339,7 @@ void loop() {
 
   if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
-    Mode m0 = mode;                       // capture first — handleViewKey may switch to INPUT
-    if (m0 == MODE_VIEW) handleViewKey(st);
-    if (m0 == MODE_INPUT) handleInputKey(st);
+    handleKeys(st);                       // forward everything; server decides
   }
 
   static bool toastWasShown = false;
