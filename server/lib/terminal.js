@@ -56,9 +56,11 @@ function tmuxBackend({ session, scrollbackLines = 200, runner = run, typeDelayMs
     },
     // Make sure the named session EXISTS (create it detached if missing) — this
     // is what lets `cardputerme <name>` expose a fresh session by name.
-    async ensureSession() {
+    async ensureSession(cwd) {
       if ((await runner('tmux', ['has-session', '-t', session])).code === 0) return true;
-      return (await runner('tmux', ['new-session', '-d', '-s', session])).code === 0;
+      const args = ['new-session', '-d', '-s', session];
+      if (cwd) args.push('-c', cwd);
+      return (await runner('tmux', args)).code === 0;
     },
     async capture() {
       // -e keeps ANSI colour escapes so the server can mirror the terminal's own

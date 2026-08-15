@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# cardputerme — expose this machine's terminal sessions to the Cardputer.
-#   cd ~/proj && cardputerme   -> session named after the dir, started IN the dir
-#   cardputerme <name>         -> expose a session by that name
-# If the server is already running, the session is just created and picked up by
-# auto-discovery — never a second server on the port.
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIR="$PWD"
 NAME="${1:-${SESSION:-$(basename "$PWD")}}"
-PORT="${PORT:-4711}"
-tmux has-session -t "=$NAME" 2>/dev/null || tmux new-session -d -s "$NAME" -c "$PWD"
-if curl -sf -m 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
-  echo "cardputerme — server already on :$PORT | session '$NAME' ready -> tmux attach -t $NAME"
+STATE="${CARDPUTERME_DIR:-$HOME/.cardputerme}"
+mkdir -p "$STATE"
+PID_FILE="$STATE/$NAME.pid"
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "cardputerme — '$NAME' is already exposed (pick it on the Cardputer)"
   exit 0
 fi
 cd "$ROOT/server"
-[ -d node_modules ] || npm install --no-audit --no-fund
-SESSION="$NAME" exec node server.js
+[ -d node_modules ] || npm install --no-audit --no-fund >/dev/null 2>&1
+SESSION="$NAME" SESSION_CWD="$DIR" nohup node server.js >>"$STATE/$NAME.log" 2>&1 &
+echo "$!" >"$PID_FILE"
+echo "cardputerme — exposing '$NAME' (find it on the Cardputer) | log: $STATE/$NAME.log"

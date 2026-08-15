@@ -26,6 +26,10 @@ const { parseChoices, endsWithQuestion, trimEnd } = require('./lib/detect');
 const { tmuxBackend, listTmuxSessions, listTmuxSessionsInfo, killTmuxSession } = require('./lib/terminal');
 const { createRegistry } = require('./lib/sessions');
 const { sessionsToClear } = require('./lib/idle');
+const { pickPort, freePortProbe } = require('./lib/discovery');
+const { beaconMessage, BEACON_PORT, BEACON_ADDR, BEACON_INTERVAL_MS } = require('./lib/beacon');
+const net = require('net');
+const dgram = require('dgram');
 const { buildDisplay, COLORS } = require('./lib/display');
 const { interpretKey } = require('./lib/input');
 const { parseLine, stripAnsi } = require('./lib/ansi');
@@ -49,10 +53,13 @@ const { panViewport, windowLines, anchorRow } = require('./lib/viewport');
 })();
 
 // ---- config ----------------------------------------------------------------
-const PORT = parseInt(process.env.PORT || '4711', 10);
+const PORT_START = 8001;
+const PORT_TRIES = 255;
 // Optional default session to pre-select. The user need NOT know any session
 // name — sessions are auto-discovered and picked on the device. Empty = none.
 const DEFAULT_SESSION = process.env.SESSION || process.env.TMUX_SESSION || '';
+const SESSION_CWD = process.env.SESSION_CWD || '';
+const SINGLE = DEFAULT_SESSION !== '';
 const WRAP_COLS = parseInt(process.env.WRAP_COLS || '20', 10);
 const LINES_PER_CARD = parseInt(process.env.LINES_PER_CARD || '7', 10);
 const SCROLLBACK_LINES = parseInt(process.env.SCROLLBACK_LINES || '200', 10);
@@ -95,6 +102,11 @@ function clamp(v, lo, hi) {
 // active selection valid. The user never types a session name — sessions are
 // found here and picked on the device. Cheap; safe to call often.
 async function refreshSessions() {
+  if (SINGLE) {
+    if (!registry.has(DEFAULT_SESSION)) registry.add(DEFAULT_SESSION, makeBackend(DEFAULT_SESSION));
+    activeSessionName = DEFAULT_SESSION;
+    return;
+  }
   const live = await listTmuxSessions();
   registry.prune(live);
   for (const name of live) {
@@ -409,7 +421,12 @@ async function sweepIdleSessions() {
   broadcast(sessionsMessage());
   pushIfChanged(true).catch(() => {});
 }
-if (IDLE_MINUTES > 0) setInterval(() => { sweepIdleSessions().catch(() => {}); }, 60000);
+if (IDLE_MINUTES > 0 && !SINGLE) setInterval(() => { sweepIdleSessions().catch(() => {}); }, 60000);
+if (SINGLE) setInterval(async () => {
+  if (await activeTerminal().exists()) return;
+  console.log(`[expose] session '${DEFAULT_SESSION}' is gone — shutting down`);
+  process.exit(0);
+}, 60000);
 
 // Server-side tick (NOT device polling): catches screen changes that emit no
 // event — prompts, menus, live streaming. The Cardputer just receives pushes.
@@ -417,14 +434,32 @@ setInterval(() => { if (wss.clients.size) pushIfChanged(false).catch(() => {}); 
 // Keep sockets alive with a periodic ping.
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 20000);
 
-server.listen(PORT, '0.0.0.0', async () => {
-  console.log(`cardputerme — terminal remote on http://0.0.0.0:${PORT}  (ws://…/ws)`);
-  console.log(`  cards  : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines | notify: ${NOTIFY ? 'on' : 'off'}`);
-  // `cardputerme <name>` EXPOSES a session by that name — create it if missing.
-  if (DEFAULT_SESSION) {
-    const created = await makeBackend(DEFAULT_SESSION).ensureSession();
-    if (!created) console.log(`  ! could not create session '${DEFAULT_SESSION}'`);
+function startBeacon(port) {
+  const sock = dgram.createSocket('udp4');
+  sock.on('error', () => {});
+  sock.bind(() => sock.setBroadcast(true));
+  const msg = Buffer.from(beaconMessage(DEFAULT_SESSION || 'cardputerme', port));
+  setInterval(() => sock.send(msg, 0, msg.length, BEACON_PORT, BEACON_ADDR), BEACON_INTERVAL_MS);
+  console.log(`  beacon : udp ${BEACON_ADDR}:${BEACON_PORT} every ${BEACON_INTERVAL_MS}ms`);
+}
+
+async function start() {
+  const port = await pickPort(freePortProbe(net), { start: PORT_START, tries: PORT_TRIES });
+  if (port === 0) {
+    console.log(`cardputerme — no free port between ${PORT_START} and ${PORT_START + PORT_TRIES - 1}`);
+    process.exit(1);
   }
-  await refreshSessions();
-  console.log(`  sessions: ${registry.names().join(', ') || '(none yet)'} | active: ${activeSessionName || '(none)'}`);
-});
+  server.listen(port, '0.0.0.0', async () => {
+    console.log(`cardputerme — terminal remote on http://0.0.0.0:${port}  (ws://…/ws)`);
+    console.log(`  cards  : ${WRAP_COLS} cols x ${LINES_PER_CARD} lines | notify: ${NOTIFY ? 'on' : 'off'}`);
+    // `cardputerme <name>` EXPOSES a session by that name — create it if missing.
+    if (DEFAULT_SESSION) {
+      const created = await makeBackend(DEFAULT_SESSION).ensureSession(SESSION_CWD);
+      if (!created) console.log(`  ! could not create session '${DEFAULT_SESSION}'`);
+    }
+    await refreshSessions();
+    console.log(`  sessions: ${registry.names().join(', ') || '(none yet)'} | active: ${activeSessionName || '(none)'}`);
+    startBeacon(port);
+  });
+}
+start();

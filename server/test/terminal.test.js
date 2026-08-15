@@ -100,6 +100,13 @@ test('ensureSession() creates a detached session when it does not exist', async 
   assert.deepEqual(r.calls[1].args, ['new-session', '-d', '-s', 'test']);
 });
 
+test('ensureSession(cwd) creates the session in the given working dir', async () => {
+  const r = fakeRunner([{ code: 1 }, { code: 0 }]);
+  const t = tmuxBackend({ session: 'test', runner: r });
+  assert.equal(await t.ensureSession('/Users/x/proj'), true);
+  assert.deepEqual(r.calls[1].args, ['new-session', '-d', '-s', 'test', '-c', '/Users/x/proj']);
+});
+
 test('ensureSession() is a no-op when the session already exists', async () => {
   const r = fakeRunner([{ code: 0 }]);                        // has-session: yes
   const t = tmuxBackend({ session: 'test', runner: r });
