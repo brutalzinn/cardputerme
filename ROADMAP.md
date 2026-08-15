@@ -8,17 +8,17 @@
 The whole system is verified working on hardware (E2E user-confirmed): discover, connect, mirror, drive, answer prompts, history, autosuggest, marquee, zoom. The last north-star gap is **exactness** — the device should show the terminal's OWN colors and layout, indistinguishable from ssh but for screen size. "Done" = colors match a real terminal side-by-side across ≥2 CLIs.
 
 ## 🎯 Now
-Current: **#17 Claude Code plugin — `/cardputer` skill** — expose this Claude Code session to the device without leaving Claude.
+Current: **#14 terminal-fidelity pass** — the last item: mirror the terminal's exact colors + layout. (Optional polish; the product is fully working.)
 > **Sync rule (WIP=1):** exactly one task is 🟡 at a time (mirrors the one started tasks.roblab.app task). On finish: mark ✅, log under Done (dated), promote next to 🟡, update this block. Never two 🟡. *(OpenTogg sync stopped.)*
 
 ## Plan — 3 days (deploy at end of each day)
 
-**📅 Day 1 — 2026-08-15 · Claude Code plugin**
-17. 🟡 **`/cardputer` skill (Claude Code plugin).** *(current)* Ship a Claude Code plugin in the repo (`.claude-plugin/{plugin,marketplace}.json` + `skills/cardputer/SKILL.md`). `/cardputer` detects the current tmux session (`tmux display-message -p '#{session_name}'`) and runs `cardputerme <session>` → exposes THIS session, discoverable+drivable on the device. Symlinked into `~/.claude-account{1,2}/skills/cardputer` (one repo source, both accounts). Agnostic — only calls the CLI, no Go changes. Remaining: README section; user verifies `/cardputer` in a fresh session.
-14. ⏸️ **Terminal-fidelity pass (SSH-parity)** *(paused for #17)* — #14a bold→bright done; remaining: side-by-side color/layout audit vs a real terminal (≥2 CLIs), bg/reverse scope, README truth-pass. Server-only, TDD.
-> 🚀 **Deploy (end of Day 1)** — `/cardputer` exposes the session from inside Claude Code on both accounts.
+**📅 Day 1 — 2026-08-15 · Fidelity (SSH-parity)**
+14. 🟡 **Terminal-fidelity pass.** *(current)* #14a bold→bright done (`internal/screen/ansi.go`). Remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + plain `ls --color`); extend `ansi.go` coverage where colors diverge; decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; final README truth-pass. Server-only, TDD.
+> 🚀 **Deploy (end of Day 1)** — colors faithful side-by-side; layout mirrors the terminal.
 
 ## Done 2026-08-15 (Go era)
+- **#17 Claude Code plugin — `/cardputer` skill.** Repo ships a Claude Code plugin (`.claude-plugin/{plugin,marketplace}.json` + `skills/cardputer/SKILL.md`); `/cardputer` detects the current tmux session and runs `cardputerme <session>` to expose it. Symlinked into both accounts' `skills/`. Mechanism verified on a fresh session (own port 8002 + beacon). Agnostic — only calls the CLI.
 - **#8 Device E2E — user-verified on hardware.** Full checklist confirmed working on the Cardputer: beacon discovery → WS connect → mirror → run commands → drive live Claude Code → answer prompts → history recall → autosuggest ghost + Tab → marquee → fn+esc back → zoom. 3 bugs E2E caught+fixed: beacon subnet-broadcast (`652d4f7`), grid-based prompt detection, awaiting-on-connect.
 - **#11 Zoom (server-owned text size) — verified on device.** Display msg carries `size` (one font, `setTextSize` scales); **ctrl+= / ctrl+_** (Cardputer +/-) zoom in/out, **ctrl+space** resets; viewport `cols()`/`rows()` derive inversely from size (1↔3, size 2 baseline). History recall stays on ctrl+up/down; nav (fn/opt+arrows) unchanged. Firmware flashed; zoom confirmed working on hardware.
 - **#16 Conventional Go CLI layout + on-device fixes.** `server-go/` → `cmd/cardputerme/main.go` + `internal/{screen,input,discovery,terminal,server}`; `Server` struct replaces globals; JS `server/` removed; dead code purged (`EndsWithQuestion`, `hub.sendTo`), `deadcode`+`go vet` clean; 67 tests across packages. On-device fixes: grid-based prompt detection, awaiting-on-connect, beacon subnet-broadcast, WS connect logging.
