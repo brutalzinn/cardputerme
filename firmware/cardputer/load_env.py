@@ -1,8 +1,12 @@
 Import("env")
-import os, re
+import os
 
 # Load firmware/.env and inject each KEY=VALUE as a -DENV_KEY build flag,
-# so settings (WiFi, server IP) stay out of source and are set at upload time.
+# so WiFi settings stay out of source and are set at upload time.
+def is_int(s):
+    body = s[1:] if s.startswith("-") else s
+    return body.isdigit()
+
 env_path = os.path.join(env["PROJECT_DIR"], ".env")
 if not os.path.isfile(env_path):
     print("load_env: no .env found (using defaults in main.cpp)")
@@ -15,9 +19,9 @@ else:
                 continue
             key, val = line.split("=", 1)
             key, val = key.strip(), val.strip()
-            if re.fullmatch(r"-?\d+", val):        # numeric -> unquoted
+            if is_int(val):
                 flags.append(f'-DENV_{key}={val}')
-            else:                                    # string -> escaped quotes
+            else:
                 esc = val.replace('\\', '\\\\').replace('"', '\\"')
                 flags.append(f'-DENV_{key}=\\"{esc}\\"')
     env.Append(BUILD_FLAGS=flags)
