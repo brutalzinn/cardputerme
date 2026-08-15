@@ -56,6 +56,8 @@ func main() {
 		Notify:          os.Getenv("NOTIFY") != "0",
 		DimAfter:        time.Duration(envInt("DIM_AFTER_S", 30)) * time.Second,
 		OffAfter:        time.Duration(envInt("OFF_AFTER_S", 120)) * time.Second,
+		RepeatDelay:     time.Duration(envInt("REPEAT_DELAY_MS", 350)) * time.Millisecond,
+		RepeatInterval:  time.Duration(envInt("REPEAT_INTERVAL_MS", 90)) * time.Millisecond,
 	}
 	if err := server.New(cfg).Run(); err != nil {
 		log.Fatal(err)

@@ -426,11 +426,25 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
-void sendKey(const char* key) {
+String g_heldKey = "";
+
+void sendKeyState(const char* key, const char* state) {
   JsonDocument doc;
   doc["type"] = "key";
   doc["key"] = key;
+  doc["state"] = state;
   sendDoc(doc);
+}
+
+void sendKey(const char* key) {
+  g_heldKey = key;
+  sendKeyState(key, "down");
+}
+
+void releaseKey() {
+  if (g_heldKey.length() == 0) return;
+  sendKeyState(g_heldKey.c_str(), "up");
+  g_heldKey = "";
 }
 
 const char* arrowFor(char c) {
@@ -471,8 +485,15 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
 }
 
 void handleKeyPress(const Keyboard_Class::KeysState& st) {
-  if (g_power != POWER_ON) { requestWake(); return; }
+  if (g_power == POWER_OFF) { requestWake(); return; }
+  if (g_power == POWER_DIM) requestWake();
   handleKeys(st);
+}
+
+void handleKeyboard() {
+  if (!M5Cardputer.Keyboard.isChange()) return;
+  if (!M5Cardputer.Keyboard.isPressed()) { releaseKey(); return; }
+  handleKeyPress(M5Cardputer.Keyboard.keysState());
 }
 
 void setup() {
@@ -507,10 +528,7 @@ void loop() {
 
   if (M5Cardputer.BtnA.wasPressed()) togglePower();
 
-  if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-    Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
-    handleKeyPress(st);
-  }
+  handleKeyboard();
 
   static bool toastWasShown = false;
   bool toastShowing = (millis() < toastUntil) && toast.length();

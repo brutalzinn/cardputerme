@@ -17,6 +17,7 @@ import (
 	"cardputerme/internal/discovery"
 	"cardputerme/internal/input"
 	"cardputerme/internal/power"
+	"cardputerme/internal/repeat"
 	"cardputerme/internal/screen"
 	"cardputerme/internal/terminal"
 
@@ -31,7 +32,20 @@ const (
 	noSession      = "Terminal is gone.\nRun cardputerme on\nthe computer to\nexpose it again."
 	portStart      = 8001
 	portTries      = 255
+	repeatMaxHold  = 10 * time.Second
 )
+
+var repeatArrows = map[string]bool{"up": true, "down": true, "left": true, "right": true}
+
+func repeatableAction(a input.Action) bool {
+	if a.Kind == "pan" {
+		return true
+	}
+	if a.Kind == "pressKey" {
+		return repeatArrows[a.Key]
+	}
+	return false
+}
 
 // Config is everything the CLI passes in; there are no package globals.
 type Config struct {
@@ -45,6 +59,8 @@ type Config struct {
 	Notify          bool
 	DimAfter        time.Duration
 	OffAfter        time.Duration
+	RepeatDelay     time.Duration
+	RepeatInterval  time.Duration
 }
 
 type mirrorCache struct {
@@ -85,6 +101,10 @@ type Server struct {
 	power      *power.Tracker
 	powerMu    sync.Mutex
 	powerTimer *time.Timer
+
+	repeat      *repeat.Holder
+	repeatMu    sync.Mutex
+	repeatTimer *time.Timer
 }
 
 const (
@@ -110,6 +130,7 @@ func New(cfg Config) *Server {
 		hist:     -1,
 		size:     baseSize,
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
+		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
 	}
 }
 
@@ -345,7 +366,7 @@ func (s *Server) armPowerTimer() {
 	})
 }
 
-func (s *Server) applyKey(key string) {
+func (s *Server) applyKey(key string) bool {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
@@ -388,6 +409,46 @@ func (s *Server) applyKey(key string) {
 	if echo != "" {
 		s.hub.broadcast(echo)
 	}
+	return repeatableAction(a)
+}
+
+func (s *Server) keyDown(key string, now time.Time) {
+	if !s.applyKey(key) {
+		s.repeat.Release()
+		s.armRepeatTimer()
+		return
+	}
+	s.repeat.Down(key, now)
+	s.armRepeatTimer()
+}
+
+func (s *Server) keyUp(key string) {
+	if !s.repeat.Up(key) {
+		return
+	}
+	s.armRepeatTimer()
+}
+
+func (s *Server) armRepeatTimer() {
+	d, ok := s.repeat.Next(time.Now())
+	s.repeatMu.Lock()
+	defer s.repeatMu.Unlock()
+	if s.repeatTimer != nil {
+		s.repeatTimer.Stop()
+		s.repeatTimer = nil
+	}
+	if !ok {
+		return
+	}
+	s.repeatTimer = time.AfterFunc(d, func() {
+		key := s.repeat.Key()
+		if key == "" {
+			return
+		}
+		s.repeat.Fired(time.Now())
+		s.applyKey(key)
+		s.armRepeatTimer()
+	})
 }
 
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -414,9 +475,10 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var m struct {
-			Type string `json:"type"`
-			Key  string `json:"key"`
-			Text string `json:"text"`
+			Type  string `json:"type"`
+			Key   string `json:"key"`
+			Text  string `json:"text"`
+			State string `json:"state"`
 		}
 		if json.Unmarshal(data, &m) != nil {
 			continue
@@ -427,7 +489,11 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		case "sleep":
 			s.applyPower(s.power.Sleep(time.Now()))
 		case "key":
-			s.applyKey(m.Key)
+			if m.State == "up" {
+				s.keyUp(m.Key)
+				continue
+			}
+			s.keyDown(m.Key, time.Now())
 		case "cmd":
 			for _, ch := range m.Text {
 				if ch == '\n' {
