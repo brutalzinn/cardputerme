@@ -40,11 +40,5 @@ function parseChoices(text) {
   return out;
 }
 
-function detectChoice(text) {
-  const options = parseChoices(text);
-  const question = endsWithQuestion(text);
-  return { awaiting: options.length >= 2 || question, question, options };
-}
-
-module.exports = { endsWithQuestion, parseChoices, detectChoice, trimEnd };
+module.exports = { endsWithQuestion, parseChoices, trimEnd };
 

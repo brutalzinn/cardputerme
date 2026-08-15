@@ -39,16 +39,6 @@ test('capture() omits the -S flag when scrollback is 0', async () => {
   assert.deepEqual(ok.calls[0].args, ['capture-pane', '-p', '-e', '-t', 'S']);
 });
 
-test('cwd() runs display-message and returns the trimmed path', async () => {
-  const ok = fakeRunner([{ code: 0, stdout: '/Users/x/proj\n' }]);
-  const t = createBackend({ session: 'S', runner: ok });
-  assert.equal(await t.cwd(), '/Users/x/proj');
-  assert.deepEqual(ok.calls[0].args, ['display-message', '-p', '-t', 'S', '#{pane_current_path}']);
-
-  const fail = fakeRunner([{ code: 1, stdout: '/nope' }]);
-  assert.equal(await createBackend({ session: 'S', runner: fail }).cwd(), '');
-});
-
 test('sendText() types the literal text then submits with Enter', async () => {
   const ok = fakeRunner([{ code: 0 }, { code: 0 }]);
   const t = createBackend({ session: 'S', runner: ok, typeDelayMs: 0 });

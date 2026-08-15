@@ -51,10 +51,6 @@ function createBackend({ session, scrollbackLines = 200, runner = run, typeDelay
       const { code, stdout } = await runner('tmux', args);
       return code === 0 ? stdout : null;
     },
-    async cwd() {
-      const { code, stdout } = await runner('tmux', ['display-message', '-p', '-t', session, '#{pane_current_path}']);
-      return code === 0 ? stdout.trim() : '';
-    },
 
     async sendText(text) {
       if ((await runner('tmux', ['send-keys', '-t', session, '-l', text])).code !== 0) return false;

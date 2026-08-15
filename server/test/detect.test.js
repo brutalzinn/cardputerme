@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { endsWithQuestion, parseChoices, detectChoice } = require('../lib/detect');
+const { endsWithQuestion, parseChoices } = require('../lib/detect');
 
 test('endsWithQuestion is true when text ends with a question mark', () => {
   assert.equal(endsWithQuestion('Do you want to proceed?'), true);
@@ -37,28 +37,4 @@ test('parseChoices ignores lines that are not options', () => {
   assert.deepEqual(parseChoices('3.14 is pi\nno number here\n1.no space'), []);
 });
 
-test('detectChoice flags awaiting on a 2+ option menu', () => {
-  const d = detectChoice('Choose:\n1. Yes\n2. No');
-  assert.equal(d.awaiting, true);
-  assert.equal(d.options.length, 2);
-});
-
-test('detectChoice flags awaiting on a trailing question with no menu', () => {
-  const d = detectChoice('Should I continue?');
-  assert.equal(d.awaiting, true);
-  assert.equal(d.question, true);
-  assert.equal(d.options.length, 0);
-});
-
-test('detectChoice is not awaiting on a plain statement', () => {
-  const d = detectChoice('Finished the refactor.');
-  assert.equal(d.awaiting, false);
-  assert.equal(d.question, false);
-  assert.equal(d.options.length, 0);
-});
-
-test('detectChoice does not treat a single stray option as a menu', () => {
-  const d = detectChoice('Step 1. do the thing');
-  assert.equal(d.awaiting, false);
-});
 
