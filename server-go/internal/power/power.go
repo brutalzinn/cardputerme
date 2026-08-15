@@ -94,7 +94,7 @@ func (t *Tracker) SetInhibit(now time.Time, on bool) (State, bool) {
 	if t.forced {
 		return t.settle(Off)
 	}
-	return t.settle(t.policy.stateAt(0))
+	return t.settle(On)
 }
 
 func (t *Tracker) Until(now time.Time) time.Duration {

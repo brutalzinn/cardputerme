@@ -347,13 +347,17 @@ void applyDisplay(JsonDocument& doc) {
   redraw();
 }
 
-void sendEvent(const char* type) {
+void sendDoc(JsonDocument& doc) {
   if (!wsConnected) return;
-  JsonDocument doc;
-  doc["type"] = type;
   String body;
   serializeJson(doc, body);
   webSocket.sendTXT(body);
+}
+
+void sendEvent(const char* type) {
+  JsonDocument doc;
+  doc["type"] = type;
+  sendDoc(doc);
 }
 
 uint8_t brightnessFor(PowerState p) {
@@ -423,13 +427,10 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 void sendKey(const char* key) {
-  if (!wsConnected) return;
   JsonDocument doc;
   doc["type"] = "key";
   doc["key"] = key;
-  String body;
-  serializeJson(doc, body);
-  webSocket.sendTXT(body);
+  sendDoc(doc);
 }
 
 const char* arrowFor(char c) {

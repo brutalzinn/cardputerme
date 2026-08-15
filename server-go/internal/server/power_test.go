@@ -8,10 +8,10 @@ import (
 )
 
 func sleepyServer() *Server {
-	cfg := Config{Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true}
-	cfg.DimAfter = 30 * time.Second
-	cfg.OffAfter = 120 * time.Second
-	return New(cfg)
+	return New(Config{
+		Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true,
+		DimAfter: 30 * time.Second, OffAfter: 120 * time.Second,
+	})
 }
 
 func TestPowerMessageWire(t *testing.T) {
