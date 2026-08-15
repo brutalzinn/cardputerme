@@ -49,22 +49,46 @@ func partAt(parts []string, i int) int {
 	return atoiDefault(parts[i])
 }
 
-func applySGR(params string, curFg, def uint16) uint16 {
+// applySGR folds one escape's SGR params into the running (fg, bold) state.
+// Bold brightens the 8 basic colors (30-37 -> the 90-97 variant), which is how
+// most terminals render bold+color — so the device mirrors what you actually see.
+func applySGR(params string, curFg uint16, curBold bool, def uint16) (uint16, bool) {
 	parts := splitByte(params, ';')
 	if params == "" {
 		parts = []string{"0"}
 	}
 	fg := curFg
+	bold := curBold
 	k := 0
 	for k < len(parts) {
 		n := partAt(parts, k)
-		if n == 0 || n == 39 {
+		if n == 0 {
+			fg = def
+			bold = false
+			k++
+			continue
+		}
+		if n == 1 {
+			bold = true
+			k++
+			continue
+		}
+		if n == 22 {
+			bold = false
+			k++
+			continue
+		}
+		if n == 39 {
 			fg = def
 			k++
 			continue
 		}
 		if n >= 30 && n <= 37 {
-			fg = sys16[n-30]
+			if bold {
+				fg = sys16[n-30+8]
+			} else {
+				fg = sys16[n-30]
+			}
 			k++
 			continue
 		}
@@ -90,7 +114,7 @@ func applySGR(params string, curFg, def uint16) uint16 {
 		}
 		k++
 	}
-	return fg
+	return fg, bold
 }
 
 func isFinalByte(c byte) bool {
@@ -100,6 +124,7 @@ func isFinalByte(c byte) bool {
 func parseLine(raw string, def uint16) (string, uint16) {
 	var text []byte
 	curFg := def
+	curBold := false
 	lineColor := def
 	colorSet := false
 	n := len(raw)
@@ -112,7 +137,7 @@ func parseLine(raw string, def uint16) (string, uint16) {
 				j++
 			}
 			if j < n && raw[j] == 'm' {
-				curFg = applySGR(raw[i+2:j], curFg, def)
+				curFg, curBold = applySGR(raw[i+2:j], curFg, curBold, def)
 			}
 			i = j + 1
 			continue

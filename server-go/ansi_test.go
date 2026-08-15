@@ -64,3 +64,21 @@ func TestParseLine(t *testing.T) {
 		t.Fatalf("leading spaces got %q %#x", txt, col)
 	}
 }
+
+func TestParseLineBoldBrightens(t *testing.T) {
+	// bold + red (1;31) renders as bright red, matching most terminals
+	_, col := parseLine(esc+"[1;31mX", 0xFFFF)
+	if col != sys16[9] {
+		t.Fatalf("bold+31 got %#x want bright red %#x", col, sys16[9])
+	}
+	// bold set in a prior escape carries into the next color
+	_, col = parseLine(esc+"[1m"+esc+"[32mX", 0xFFFF)
+	if col != sys16[10] {
+		t.Fatalf("bold then 32 got %#x want bright green %#x", col, sys16[10])
+	}
+	// non-bold basic color stays normal
+	_, col = parseLine(esc+"[31mX", 0xFFFF)
+	if col != sys16[1] {
+		t.Fatalf("plain 31 got %#x want normal red %#x", col, sys16[1])
+	}
+}
