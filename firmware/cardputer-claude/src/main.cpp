@@ -56,7 +56,7 @@ const int   WRAP_COLS = ENV_WRAP_COLS;
 #define SCR_H       135
 #define HEADER_H    14        // top status bar height
 #define STATUS_H    16        // bottom status bar height
-#define INPUT_H     18        // command entry bar height (INPUT mode only)
+#define INPUT_H     52        // command entry region height (INPUT mode; auto multi-line)
 #define LINE_H      16        // size-2 font line height (12x16 px glyphs)
 #define SBAR_W      3         // right-edge scroll indicator width
 
@@ -210,20 +210,37 @@ void drawStatusBar() {
   d.print(s);
 }
 
-// Command entry bar, just above the status bar (INPUT mode only).
+// Command entry region above the status bar (INPUT mode). Auto multi-line: the
+// text word/char-wraps as it grows, so big messages that can't fit one line
+// are shown across several lines (newest lines kept).
 void drawInputBar() {
   auto& d = M5Cardputer.Display;
   int y0 = SCR_H - STATUS_H - INPUT_H;
   d.fillRect(0, y0, SCR_W, INPUT_H, COL_HDR);
   d.setTextSize(2);
   d.setTextColor(COL_ACCENT, COL_HDR);
-  d.setCursor(2, y0 + 2);
-  String shown = inputBuf;
-  const int maxChars = 19;
-  if ((int)shown.length() > maxChars) shown = shown.substring(shown.length() - maxChars);
-  d.print(">");
-  d.print(shown);
-  d.print("_");
+
+  // Wrap the buffer (explicit \n from Shift+Enter, plus width wrapping) into lines.
+  const int cols = 19;
+  std::vector<String> lines;
+  String cur = "";
+  for (int i = 0; i < (int)inputBuf.length(); i++) {
+    char ch = inputBuf[i];
+    if (ch == '\n') { lines.push_back(cur); cur = ""; continue; }
+    cur += ch;
+    if ((int)cur.length() >= cols) { lines.push_back(cur); cur = ""; }
+  }
+  lines.push_back(cur + "_");               // cursor on the last line
+
+  const int maxLines = INPUT_H / LINE_H;    // how many fit in the region
+  int start = (int)lines.size() > maxLines ? (int)lines.size() - maxLines : 0;
+  int y = y0 + 2;
+  for (int i = start; i < (int)lines.size(); i++) {
+    d.setCursor(2, y);
+    if (i == start) d.print(">");
+    d.print(lines[i]);
+    y += LINE_H;
+  }
 }
 
 void redraw() {
@@ -313,32 +330,34 @@ void sendCommand(const String& text) {
   showToast("Sent");
 }
 
+// Forward a NAMED key (arrows, etc.) for the SERVER to interpret — e.g. panning
+// the viewport. The device decides nothing; it just reports the key.
+void sendKey(const char* key) {
+  if (!wsConnected) return;
+  JsonDocument doc;
+  doc["type"] = "key";
+  doc["key"] = key;
+  String body;
+  serializeJson(doc, body);
+  webSocket.sendTXT(body);
+}
+
 // ------------------------------------------------------------------ input
 void handleViewKey(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
-    if (c == ';') {                       // up -> previous page (stop following)
-      if (g_page > 0) g_page--;
-      follow = false;
-      redraw();
-      return;
-    }
-    if (c == '.') {                       // down -> next page
-      if (g_page + 1 < pageCount()) g_page++;
-      if (g_page >= pageCount() - 1) follow = true;
-      redraw();
-      return;
-    }
-    // any other key -> start a command (incl. `esc`/backtick; the server reads it)
+    // Cardputer arrow cluster -> forward for the SERVER to pan the viewport
+    // (omnidirectional reading of wide / multi-line text).
+    if (c == ';') { sendKey("up");    return; }
+    if (c == '.') { sendKey("down");  return; }
+    if (c == ',') { sendKey("left");  return; }
+    if (c == '/') { sendKey("right"); return; }
+    if (c == '`') { sendKey("esc");   return; }   // esc key -> server handles (Escape / picker)
+    // any other key -> start composing a command
     mode = MODE_INPUT;
     inputBuf = "";
     inputBuf += c;
     redraw();
     return;
-  }
-  if (st.enter) {                         // Enter alone -> start an empty command
-    mode = MODE_INPUT;
-    inputBuf = "";
-    redraw();
   }
 }
 
@@ -352,11 +371,14 @@ void handleInputKey(const Keyboard_Class::KeysState& st) {
     inputBuf.remove(inputBuf.length() - 1);
     changed = true;
   }
-  if (st.enter) {                         // submit over the websocket
+  if (st.enter && st.shift) {             // Shift+Enter = newline (compose multi-line)
+    inputBuf += '\n';
+    changed = true;
+  }
+  if (st.enter && !st.shift) {            // Enter = confirm/SEND
     String cmd = inputBuf;
     inputBuf = "";
     mode = MODE_VIEW;
-    follow = true;
     sendCommand(cmd);
     redraw();
     return;

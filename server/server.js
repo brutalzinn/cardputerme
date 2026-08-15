@@ -28,6 +28,7 @@ const { createRegistry } = require('./lib/sessions');
 const { buildDisplay, COLORS } = require('./lib/display');
 const { interpretKey } = require('./lib/input');
 const { parseLine, stripAnsi } = require('./lib/ansi');
+const { panViewport, windowLines } = require('./lib/viewport');
 
 // ---- tiny .env loader (no dependency) --------------------------------------
 (function loadEnv() {
@@ -70,6 +71,19 @@ let activeSessionName = DEFAULT_SESSION;
 // UI interaction state, driven entirely server-side by the input FSM (lib/input).
 // 'mirror' = showing a session; 'picker' = showing the numbered session menu.
 let uiState = { mode: 'mirror' };
+
+// Server-owned omnidirectional viewport over the terminal's native-width grid.
+// The device forwards arrow keys; the server pans and sends only this window.
+const VIEW_ROWS = 6;             // fits the device body between header + status bar
+const VIEW_COLS = WRAP_COLS;     // device columns
+let view = { row: 0, col: 0, follow: true };
+let escTimer = null;   // pending single-esc (debounced to detect a double-esc)
+
+function clamp(v, lo, hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
 
 // Auto-discover live sessions and register any we don't know yet; keep the
 // active selection valid. The user never types a session name — sessions are
@@ -134,21 +148,20 @@ function screenLines(text) {
   return lines;
 }
 
-// Wrap ANSI-coloured pane rows into capped {text,color} display lines — each
-// wrapped piece keeps its row's terminal colour (mirrored, translated to RGB565).
-function coloredLines(rows) {
+// Turn ANSI-coloured pane rows into a NATIVE-WIDTH coloured grid (no wrapping) —
+// the viewport pans over this so the layout stays terminal-like. Each row keeps
+// its terminal colour (mirrored, translated to RGB565).
+function gridLines(rows) {
   const out = [];
   for (const raw of rows) {
     const { text, color } = parseLine(raw, COLORS.text);
-    for (const piece of wrapLine(toAscii(text).split('\t').join('  '), WRAP_COLS)) {
-      out.push({ text: trimEnd(piece), color });
-    }
+    out.push({ text: toAscii(text).split('\t').join('  '), color });
   }
   if (out.length > MAX_LINES) return out.slice(out.length - MAX_LINES);
   return out;
 }
 
-// Split a captured (ANSI) pane into coloured body lines + a one-line STATUS (the
+// Split a captured (ANSI) pane into a coloured grid + a one-line STATUS (the
 // terminal's bottom status row = its last non-empty line, like Claude Code's bar).
 function splitScreen(pane) {
   const rows = String(pane || '').split('\n');
@@ -156,9 +169,9 @@ function splitScreen(pane) {
   for (let i = rows.length - 1; i >= 0; i--) {
     if (stripAnsi(rows[i]).trim()) { last = i; break; }
   }
-  if (last < 0) return { lines: [], status: '' };
+  if (last < 0) return { grid: [], status: '' };
   const status = toAscii(stripAnsi(rows[last])).trim();
-  return { lines: coloredLines(rows.slice(0, last)), status };
+  return { grid: gridLines(rows.slice(0, last)), status };
 }
 
 // Build the current screen: body lines + a status string. NO modes/transcript;
@@ -180,9 +193,20 @@ async function buildState() {
   if (prompt) {
     return { lines: screenLines(prompt), status: `[${activeSessionName}] answer the prompt`, sessionExists: true, awaiting: true };
   }
-  // Mirror: colour body lines from the terminal's OWN colours; extract the status.
-  const { lines, status } = splitScreen(pane);
-  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${status}`, sessionExists: true, awaiting: false };
+  // Mirror: a native-width coloured grid + the status. The server-owned viewport
+  // pans over the grid (arrow keys); we send only the visible window.
+  const { grid, status } = splitScreen(pane);
+  let maxLen = 0;
+  for (const l of grid) { if (l.text.length > maxLen) maxLen = l.text.length; }
+  const maxRow = Math.max(0, grid.length - VIEW_ROWS);
+  const maxCol = Math.max(0, maxLen - VIEW_COLS);
+  if (view.follow) view.row = maxRow;
+  view.row = clamp(view.row, 0, maxRow);
+  view.col = clamp(view.col, 0, maxCol);
+  if (view.row >= maxRow) view.follow = true;   // back at the bottom -> follow again
+  const lines = windowLines(grid, view, { rows: VIEW_ROWS, cols: VIEW_COLS });
+  const bar = `${status}  r${view.row}/${maxRow} c${view.col}`;
+  return { lines: lines.length ? lines : screenLines('(empty)'), status: `[${activeSessionName}] ${bar}`, sessionExists: true, awaiting: false };
 }
 
 // ---- HTTP (debugging only) -------------------------------------------------
@@ -253,6 +277,30 @@ async function pushIfChanged(force) {
   lastAwaiting = st.awaiting;
 }
 
+// Esc is handled entirely server-side (the device just forwards the key). A
+// quick DOUBLE esc opens the session picker; a single esc (after a short debounce
+// to rule out a double) sends a real Escape to the terminal — like any terminal.
+function handleEsc() {
+  if (uiState.mode === 'picker') {           // esc in the picker cancels back to mirror
+    uiState = { mode: 'mirror' };
+    if (escTimer) { clearTimeout(escTimer); escTimer = null; }
+    pushIfChanged(true).catch(() => {});
+    return;
+  }
+  if (escTimer) {                            // second esc within the window -> picker
+    clearTimeout(escTimer);
+    escTimer = null;
+    uiState = { mode: 'picker' };
+    pushIfChanged(true).catch(() => {});
+    return;
+  }
+  escTimer = setTimeout(() => {              // no second esc -> single -> Escape to terminal
+    escTimer = null;
+    activeTerminal().sendKey('Escape')
+      .finally(() => setTimeout(() => pushIfChanged(true).catch(() => {}), 200));
+  }, 350);
+}
+
 wss.on('connection', async (ws, req) => {
   const who = (req && req.socket && req.socket.remoteAddress) || '?';
   console.log(`[ws] connect ${who} (clients=${wss.clients.size})`);
@@ -275,6 +323,17 @@ wss.on('connection', async (ws, req) => {
       activeSessionName = m.name;
       ws.send(sessionsMessage());
       pushIfChanged(true).catch(() => {});
+      return;
+    }
+    // Named keys, all interpreted server-side. Esc -> handleEsc (Escape / picker);
+    // arrows -> pan the viewport (mirror mode) for omnidirectional reading.
+    if (m.type === 'key' && typeof m.key === 'string') {
+      const key = m.key;
+      if (key === 'esc') { handleEsc(); return; }
+      if (uiState.mode === 'mirror') {
+        view = panViewport(view, key);
+        pushIfChanged(true).catch(() => {});
+      }
       return;
     }
     // Ask for the current session list.
