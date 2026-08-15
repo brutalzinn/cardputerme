@@ -318,7 +318,7 @@ func (s *Server) pushIfChanged(force bool) {
 		s.applyPower(s.power.SetInhibit(time.Now(), st.awaiting))
 	}
 	if changed {
-		s.hub.broadcast(msg)
+		s.hub.broadcastFrame(msg)
 	}
 	if s.cfg.Notify && freshQuestion {
 		s.hub.broadcast(`{"type":"notify","reason":"question"}`)
@@ -387,9 +387,17 @@ func (s *Server) applyKey(key string) input.Action {
 		s.backend.SendKey(a.Key)
 	}
 	if echo != "" {
-		s.hub.broadcast(echo)
+		s.hub.broadcastFrame(echo)
 	}
 	return a
+}
+
+func (s *Server) handleKeyEvent(key, state string, now time.Time) {
+	if state == "up" {
+		s.keyUp(key)
+		return
+	}
+	s.keyDown(key, now)
 }
 
 func (s *Server) keyDown(key string, now time.Time) {
@@ -451,10 +459,14 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var m struct {
-			Type  string `json:"type"`
-			Key   string `json:"key"`
-			Text  string `json:"text"`
-			State string `json:"state"`
+			Type   string `json:"type"`
+			Key    string `json:"key"`
+			Text   string `json:"text"`
+			State  string `json:"state"`
+			Events []struct {
+				Key   string `json:"key"`
+				State string `json:"state"`
+			} `json:"events"`
 		}
 		if json.Unmarshal(data, &m) != nil {
 			continue
@@ -465,11 +477,12 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		case "sleep":
 			s.applyPower(s.power.Sleep(time.Now()))
 		case "key":
-			if m.State == "up" {
-				s.keyUp(m.Key)
-				continue
+			s.handleKeyEvent(m.Key, m.State, time.Now())
+		case "keys":
+			now := time.Now()
+			for _, e := range m.Events {
+				s.handleKeyEvent(e.Key, e.State, now)
 			}
-			s.keyDown(m.Key, time.Now())
 		case "cmd":
 			for _, ch := range m.Text {
 				if ch == '\n' {

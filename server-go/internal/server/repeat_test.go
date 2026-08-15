@@ -78,3 +78,35 @@ func TestADimScreenStillTakesTheKey(t *testing.T) {
 		t.Fatalf("a dim screen is readable, so the key must go through, got %q", s.input)
 	}
 }
+
+func TestABatchAppliesEveryEventInOrder(t *testing.T) {
+	s := testServer()
+	now := time.Now()
+	for _, e := range []struct{ key, state string }{{"h", "down"}, {"h", "up"}, {"i", "down"}, {"i", "up"}} {
+		s.handleKeyEvent(e.key, e.state, now)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.input != "hi" {
+		t.Fatalf("got %q", s.input)
+	}
+}
+
+func TestABatchCanOpenAHoldAndLeaveItHeld(t *testing.T) {
+	s := testServer()
+	now := time.Now()
+	s.handleKeyEvent("up", "down", now)
+	if got := s.repeat.Key(); got != "up" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAMissingStateIsATap(t *testing.T) {
+	s := testServer()
+	s.handleKeyEvent("a", "", time.Now())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.input != "a" {
+		t.Fatalf("old firmware sends no state and must still type, got %q", s.input)
+	}
+}

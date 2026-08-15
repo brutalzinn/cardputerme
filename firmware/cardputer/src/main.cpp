@@ -427,24 +427,33 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 char g_heldKey[24];
+JsonDocument g_keyBatch;
+JsonArray g_keyEvents;
 
-void sendKeyState(const char* key, const char* state) {
-  JsonDocument doc;
-  doc["type"] = "key";
-  doc["key"] = key;
-  doc["state"] = state;
-  sendDoc(doc);
+void queueKeyEvent(const String& key, const char* state) {
+  if (g_keyEvents.isNull()) g_keyEvents = g_keyBatch["events"].to<JsonArray>();
+  JsonObject e = g_keyEvents.add<JsonObject>();
+  e["key"] = key;
+  e["state"] = state;
+}
+
+void flushKeyEvents() {
+  if (g_keyEvents.isNull() || g_keyEvents.size() == 0) return;
+  g_keyBatch["type"] = "keys";
+  sendDoc(g_keyBatch);
+  g_keyBatch.clear();
+  g_keyEvents = JsonArray();
 }
 
 void sendKey(const char* key) {
   strncpy(g_heldKey, key, sizeof(g_heldKey) - 1);
   g_heldKey[sizeof(g_heldKey) - 1] = 0;
-  sendKeyState(key, "down");
+  queueKeyEvent(key, "down");
 }
 
 void releaseKey() {
   if (g_heldKey[0] == 0) return;
-  sendKeyState(g_heldKey, "up");
+  queueKeyEvent(g_heldKey, "up");
   g_heldKey[0] = 0;
 }
 
@@ -456,6 +465,26 @@ const char* arrowFor(char c) {
   return nullptr;
 }
 
+String keyFor(const Keyboard_Class::KeysState& st, char c) {
+  const char* arrow = arrowFor(c);
+  if (arrow && st.fn) return arrow;
+  if (arrow && st.opt) return String("opt+") + arrow;
+  if (arrow && st.ctrl) return String("ctrl+") + arrow;
+  if (st.ctrl) return String("ctrl+") + c;
+  if (st.shift && (c == '`' || c == '~')) return "shift+esc";
+  if (c == '`') return "esc";
+  return String(c);
+}
+
+String currentKey(const Keyboard_Class::KeysState& st) {
+  if (!st.word.empty()) return keyFor(st, st.word[0]);
+  if (st.del) return "backspace";
+  if (st.tab) return "tab";
+  if (st.enter && st.shift) return "shift+enter";
+  if (st.enter) return "enter";
+  return "";
+}
+
 void handleKeys(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
     if (st.fn && (c == '`' || c == '~')) { leaveServer(); return; }
@@ -463,20 +492,7 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
       if (c >= '1' && c <= '9') connectToFound(c - '1');
       continue;
     }
-    const char* arrow = arrowFor(c);
-    if (arrow && st.fn) { sendKey(arrow); continue; }
-    if (arrow && st.opt) { sendKey((String("opt+") + arrow).c_str()); continue; }
-    if (arrow && st.ctrl) { sendKey((String("ctrl+") + arrow).c_str()); continue; }
-    if (st.ctrl) {
-      char combo[8] = { 'c', 't', 'r', 'l', '+', c, 0 };
-      sendKey(combo);
-      continue;
-    }
-
-    if (st.shift && (c == '`' || c == '~')) { sendKey("shift+esc"); continue; }
-    if (c == '`') { sendKey("esc"); continue; }
-    char one[2] = { c, 0 };
-    sendKey(one);
+    sendKey(keyFor(st, c).c_str());
   }
   if (!g_haveTarget) return;
   if (st.del) sendKey("backspace");
@@ -487,9 +503,13 @@ void handleKeys(const Keyboard_Class::KeysState& st) {
 
 void handleKeyboard() {
   if (!M5Cardputer.Keyboard.isChange()) return;
-  if (!M5Cardputer.Keyboard.isPressed()) { releaseKey(); return; }
+  Keyboard_Class::KeysState st = M5Cardputer.Keyboard.keysState();
+  String cur = currentKey(st);
+  if (cur != g_heldKey) releaseKey();
+  if (cur.length() == 0) { flushKeyEvents(); return; }
   if (g_power != POWER_ON) applyPower(POWER_ON);
-  handleKeys(M5Cardputer.Keyboard.keysState());
+  handleKeys(st);
+  flushKeyEvents();
 }
 
 void setup() {

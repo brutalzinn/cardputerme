@@ -27,6 +27,9 @@ func NewHolder(p Policy) *Holder {
 func (h *Holder) Down(key string, now time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if key != "" && key == h.key {
+		return
+	}
 	h.key = key
 	h.since = now
 	h.fired = false

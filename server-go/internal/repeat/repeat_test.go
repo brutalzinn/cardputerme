@@ -95,3 +95,25 @@ func TestZeroIntervalDisablesRepeating(t *testing.T) {
 		t.Fatal("no interval configured means no auto-repeat")
 	}
 }
+
+func TestHoldingTheSameKeyDoesNotRestartTheDelay(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Fired()
+	h.Down("up", now)
+	d, ok := h.Next(now)
+	if !ok || d != policy.Interval {
+		t.Fatalf("a repeated down for a held key must not fall back to the delay, got %v ok=%v", d, ok)
+	}
+}
+
+func TestHoldingTheSameKeyDoesNotExtendMaxHold(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Down("up", now.Add(9*time.Second))
+	if _, ok := h.Next(now.Add(policy.MaxHold)); ok {
+		t.Fatal("re-reporting a held key must not push the safety cap out forever")
+	}
+}
