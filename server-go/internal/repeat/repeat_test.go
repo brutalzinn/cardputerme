@@ -28,7 +28,7 @@ func TestLaterRepeatsUseTheInterval(t *testing.T) {
 	h := NewHolder(policy)
 	now := time.Now()
 	h.Down("fn+up", now)
-	h.Fired()
+	h.Fired(now)
 	d, ok := h.Next(now.Add(policy.Delay))
 	if !ok || d != policy.Interval {
 		t.Fatalf("got %v ok=%v", d, ok)
@@ -59,7 +59,7 @@ func TestANewKeyTakesOverFromTheOldOne(t *testing.T) {
 	h := NewHolder(policy)
 	now := time.Now()
 	h.Down("fn+up", now)
-	h.Fired()
+	h.Fired(now)
 	h.Down("fn+down", now)
 	if got := h.Key(); got != "fn+down" {
 		t.Fatalf("got %q", got)
@@ -100,7 +100,7 @@ func TestHoldingTheSameKeyDoesNotRestartTheDelay(t *testing.T) {
 	h := NewHolder(policy)
 	now := time.Now()
 	h.Down("up", now)
-	h.Fired()
+	h.Fired(now)
 	h.Down("up", now)
 	d, ok := h.Next(now)
 	if !ok || d != policy.Interval {
@@ -115,5 +115,45 @@ func TestHoldingTheSameKeyDoesNotExtendMaxHold(t *testing.T) {
 	h.Down("up", now.Add(9*time.Second))
 	if _, ok := h.Next(now.Add(policy.MaxHold)); ok {
 		t.Fatal("re-reporting a held key must not push the safety cap out forever")
+	}
+}
+
+func TestOneIntervalIsOnePress(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Fired(now)
+	if got := h.Due(now.Add(policy.Interval)); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestALateTimerCatchesUpInOneGo(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Fired(now)
+	if got := h.Due(now.Add(3 * policy.Interval)); got != 3 {
+		t.Fatalf("a stalled timer should catch up, got %d", got)
+	}
+}
+
+func TestAnEarlyTickStillPressesOnce(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Fired(now)
+	if got := h.Due(now); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestALongStallCannotAvalanche(t *testing.T) {
+	h := NewHolder(policy)
+	now := time.Now()
+	h.Down("up", now)
+	h.Fired(now)
+	if got := h.Due(now.Add(time.Hour)); got > maxCatchUp {
+		t.Fatalf("a suspended process must not fire an avalanche of presses, got %d", got)
 	}
 }

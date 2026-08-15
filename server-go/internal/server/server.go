@@ -25,14 +25,15 @@ import (
 )
 
 const (
-	viewRows       = 6
-	promptTailRows = 16
-	maxLines       = 90
-	historyMax     = 50
-	noSession      = "Terminal is gone.\nRun cardputerme on\nthe computer to\nexpose it again."
-	portStart      = 8001
-	portTries      = 255
-	repeatMaxHold  = 10 * time.Second
+	viewRows            = 6
+	promptTailRows      = 16
+	maxLines            = 90
+	historyMax          = 50
+	noSession           = "Terminal is gone.\nRun cardputerme on\nthe computer to\nexpose it again."
+	portStart           = 8001
+	portTries           = 255
+	repeatMaxHold       = 10 * time.Second
+	defaultPushDebounce = 15 * time.Millisecond
 )
 
 // Config is everything the CLI passes in; there are no package globals.
@@ -49,6 +50,7 @@ type Config struct {
 	OffAfter        time.Duration
 	RepeatDelay     time.Duration
 	RepeatInterval  time.Duration
+	PushDebounce    time.Duration
 }
 
 type mirrorCache struct {
@@ -343,6 +345,10 @@ func (s *Server) armPowerTimer() {
 }
 
 func (s *Server) applyKey(key string) input.Action {
+	return s.applyKeyTimes(key, 1)
+}
+
+func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
@@ -351,7 +357,9 @@ func (s *Server) applyKey(key string) input.Action {
 	a := res.Action
 	switch a.Kind {
 	case "pan":
-		s.view = screen.PanViewport(s.view, a.Key)
+		for i := 0; i < times; i++ {
+			s.view = screen.PanViewport(s.view, a.Key)
+		}
 	case "zoom":
 		switch a.Key {
 		case "in":
@@ -384,7 +392,7 @@ func (s *Server) applyKey(key string) input.Action {
 	case "send":
 		s.backend.SendText(a.Text)
 	case "pressKey":
-		s.backend.SendKey(a.Key)
+		s.backend.SendKeyTimes(a.Key, times)
 	}
 	if echo != "" {
 		s.hub.broadcastFrame(echo)
@@ -429,8 +437,10 @@ func (s *Server) armRepeatTimer() {
 		if key == "" {
 			return
 		}
-		s.repeat.Fired()
-		s.applyKey(key)
+		now := time.Now()
+		times := s.repeat.Due(now)
+		s.repeat.Fired(now)
+		s.applyKeyTimes(key, times)
 		s.armRepeatTimer()
 	})
 }
@@ -506,13 +516,20 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (s *Server) pushAfter() time.Duration {
+	if s.cfg.PushDebounce > 0 {
+		return s.cfg.PushDebounce
+	}
+	return defaultPushDebounce
+}
+
 func (s *Server) schedulePush() {
 	s.pushMu.Lock()
 	defer s.pushMu.Unlock()
 	if s.pushTimer != nil {
 		return
 	}
-	s.pushTimer = time.AfterFunc(40*time.Millisecond, func() {
+	s.pushTimer = time.AfterFunc(s.pushAfter(), func() {
 		s.pushMu.Lock()
 		s.pushTimer = nil
 		s.pushMu.Unlock()

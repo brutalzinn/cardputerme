@@ -11,12 +11,15 @@ type Policy struct {
 	MaxHold  time.Duration
 }
 
+const maxCatchUp = 8
+
 type Holder struct {
 	policy Policy
 
 	mu    sync.Mutex
 	key   string
 	since time.Time
+	last  time.Time
 	fired bool
 }
 
@@ -45,10 +48,27 @@ func (h *Holder) Up(key string) bool {
 	return true
 }
 
-func (h *Holder) Fired() {
+func (h *Holder) Fired(now time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.fired = true
+	h.last = now
+}
+
+func (h *Holder) Due(now time.Time) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.fired || h.policy.Interval <= 0 {
+		return 1
+	}
+	n := int(now.Sub(h.last) / h.policy.Interval)
+	if n < 1 {
+		return 1
+	}
+	if n > maxCatchUp {
+		return maxCatchUp
+	}
+	return n
 }
 
 func (h *Holder) Key() string {

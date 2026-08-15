@@ -110,12 +110,23 @@ func (b *Backend) SendText(text string) bool {
 	return code == 0
 }
 
-func (b *Backend) SendKey(key string) bool {
-	if named, ok := namedKey(key); ok {
-		code, _ := tmux("send-keys", "-t", b.session, named)
-		return code == 0
+func sendKeyArgs(session, key string, times int) []string {
+	args := []string{"send-keys", "-t", session}
+	if times > 1 {
+		args = append(args, "-N", strconv.Itoa(times))
 	}
-	code, _ := tmux("send-keys", "-t", b.session, "-l", key)
+	if named, ok := namedKey(key); ok {
+		return append(args, named)
+	}
+	return append(args, "-l", key)
+}
+
+func (b *Backend) SendKey(key string) bool {
+	return b.SendKeyTimes(key, 1)
+}
+
+func (b *Backend) SendKeyTimes(key string, times int) bool {
+	code, _ := tmux(sendKeyArgs(b.session, key, times)...)
 	return code == 0
 }
 
