@@ -143,6 +143,17 @@ Then in Claude Code: **`/cardputer`** → pick the exposure on the device → yo
 
 ## Develop
 
+A `Makefile` at the repo root wraps every workflow — run `make` (or `make help`) to list them:
+
+```
+make setup      # one-shot: Go deps + firmware/.env + /cardputer skill
+make check      # go vet + go test -race + deadcode (pre-commit gate)
+make flash      # build + upload firmware to the Cardputer
+make expose     # expose this terminal, then pick it on the device
+```
+
+Or drive the server directly:
+
 ```
 cd server-go && go test ./...     # 71 tests, 4 packages
 go vet ./...
