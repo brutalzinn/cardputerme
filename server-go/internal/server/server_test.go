@@ -121,21 +121,25 @@ func TestColsRowsScaleWithSize(t *testing.T) {
 	}
 }
 
-func TestZoomInOutClamped(t *testing.T) {
+func TestZoomInOutResetClamped(t *testing.T) {
 	s := testServer()
-	s.applyKey("ctrl+=") // zoom in: 2 -> 3
+	s.applyKey("ctrl+up") // zoom in: 2 -> 3
 	if s.size != 3 {
 		t.Fatalf("zoom in got %d", s.size)
 	}
-	s.applyKey("ctrl+=") // already max, stays 3
+	s.applyKey("ctrl+up") // already max, stays 3
 	if s.size != 3 {
 		t.Fatalf("zoom in clamp got %d", s.size)
 	}
-	s.applyKey("ctrl+-") // 3 -> 2
-	s.applyKey("ctrl+-") // 2 -> 1
-	s.applyKey("ctrl+-") // already min, stays 1
+	s.applyKey("ctrl+down") // 3 -> 2
+	s.applyKey("ctrl+down") // 2 -> 1
+	s.applyKey("ctrl+down") // already min, stays 1
 	if s.size != 1 {
 		t.Fatalf("zoom out clamp got %d", s.size)
+	}
+	s.applyKey("ctrl+ ") // reset to baseline
+	if s.size != baseSize {
+		t.Fatalf("zoom reset got %d", s.size)
 	}
 }
 

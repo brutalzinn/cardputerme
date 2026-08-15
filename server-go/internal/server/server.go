@@ -308,10 +308,13 @@ func (s *Server) applyKey(key string) {
 	case "pan":
 		s.view = screen.PanViewport(s.view, a.Key)
 	case "zoom":
-		if a.Key == "in" {
+		switch a.Key {
+		case "in":
 			s.size = min(sizeMax, s.size+1)
-		} else {
+		case "out":
 			s.size = max(sizeMin, s.size-1)
+		case "reset":
+			s.size = baseSize
 		}
 	case "send":
 		s.history = append(s.history, a.Text)
