@@ -1,4 +1,7 @@
 llm/
-server-go/cardputerme
-.pio/
 .env
+.pio/
+server-go/cardputerme
+*.test
+coverage.out
+.DS_Store
