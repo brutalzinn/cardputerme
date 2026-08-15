@@ -29,13 +29,13 @@ change is a server change — the firmware rarely needs a re-flash.
 
 ```
 ├── bin/cardputer-server   # the CLI (aliased as `cardputerme`)
-├── server/                # Node server — one process per exposed terminal
+├── server-go/             # Go server — one process per exposed terminal, event-driven (no polling)
 └── firmware/cardputer/    # flashed once to the Cardputer ADV
 ```
 
 ## Setup
 
-Requirements: Node ≥ 18.
+Requirements: Go ≥ 1.22 (the launcher builds the server binary on first run).
 
 ```
 git clone <repo> && cd cardputerme
@@ -52,5 +52,5 @@ pio run -e cardputer-adv -t upload
 ## Tests
 
 ```
-cd server && npm test
+cd server-go && go test ./...
 ```
