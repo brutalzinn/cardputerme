@@ -24,7 +24,7 @@ Current: **#10 server-per-exposure redesign** — server side LANDED; next: firm
    - ✅ S1 (2026-08-15): server side landed (`c20c41d`) — launcher backgrounds `node server.js` (pidfile+log in `~/.cardputerme/`, dedup per name, terminal created IN the cwd), port scan `lib/discovery.js`, beacon `lib/beacon.js`, self-exit when the terminal dies. Verified live: 2 exposures on 8001/8002, beacon received with correct IPv4.
    - ✅ S2 (2026-08-15): sessions concept KILLED (`0ef7dc3`, −471 LOC) — registry/picker/idle-sweep/sessions-wire removed; esc with empty input now reaches the terminal as a real Escape (ssh-parity).
    - ✅ S3 (2026-08-15): tmux/claude mention sweep + full comment strip (no-regex char-scan) across server/; adapter export renamed `createBackend`; README rewritten truthful; `firmware/cardputer-claude` → `firmware/cardputer`; `.env` cleaned (PORT/TMUX_SESSION/READ_MODE gone). 80/80.
-   - ⬜ S4: **firmware** — UDP beacon listener, local server picker (`N. name ip:port`, digits pick, auto-connect when only one, fn+esc back to picker), dynamic WS connect; drop baked `WS_HOST/PORT`. Flash + on-device check (user).
+   - 🟡 S4: **firmware** — CODE DONE + compiles (`af286f5`; RAM 15%, flash 32%): UDP beacon listener, local server picker (`N. name` + dim `ip:port`, digits pick, auto-connect when only one, fn+esc back, rows expire 6.5s), dynamic WS connect, baked `WS_HOST/PORT` deleted, comments stripped. **PENDING: plug the device in → `cd firmware/cardputer && $PIO run -e cardputer-adv -t upload` → on-device check (user).**
 > 🚀 **Deploy (end of Day 2)** — `cardputerme` in two dirs; both appear on the device; pick + drive each from the couch.
 
 **📅 Day 3 — 2026-08-16 · Cleanup + polish**
