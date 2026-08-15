@@ -337,7 +337,11 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hub.add(c)
-	defer hub.remove(c)
+	log.Printf("[ws] connect %s (clients=%d)", c.RemoteAddr(), len(hub.conns))
+	defer func() {
+		hub.remove(c)
+		log.Printf("[ws] close %s", c.RemoteAddr())
+	}()
 
 	session.mu.Lock()
 	st := session.buildState()
