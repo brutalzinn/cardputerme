@@ -18,8 +18,8 @@ Current: **#8 device E2E** — run the remaining on-device checklist; fix each f
 > 🚀 **Deploy (end of Day 1)** — remaining checklist passes on the device.
 
 **📅 Day 2 — 2026-08-16 · Zoom**
-11. ⬜ **Zoom (server-owned font).** Display message gains a `font` field; firmware `setTextSize`; a ctrl-chord zooms; viewport dims derive from zoom. Server + one firmware flash. TDD.
-> 🚀 **Deploy (end of Day 2)** — zoom toggles live on the device; layout re-derives.
+11. 🟡 **Zoom (server-owned text size).** *(code done 2026-08-15; flash pending USB)* Display message carries `size` (one font, different `setTextSize` scales); **ctrl+= / ctrl+-** zoom in/out (FSM `zoom` action, clamped 1–3, size 2 = baseline); viewport `cols()`/`rows()` derive inversely from size. Firmware reads `size` → `setTextSize` + dynamic `lineH()`; compiles (RAM 15%/flash 32%). 71 tests, deadcode clean. **Remaining: flash + verify on device (user does upload LAST); tune size steps on the 240×135 screen.**
+> 🚀 **Deploy (end of Day 2)** — flash; ctrl+=/- resizes text live; layout re-derives.
 
 **📅 Day 3 — 2026-08-17 · Fidelity + polish**
 14. ⬜ **Terminal-fidelity pass (SSH-parity).** #14a bold→bright done (`ansi.go`); remaining: side-by-side color/layout audit vs a real terminal with ≥2 CLIs (agent CLI + `ls --color`); decide if bg/reverse map to anything (device is per-line fg only) or document out-of-scope; README truth-pass. Server-only, TDD.
