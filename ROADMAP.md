@@ -44,6 +44,9 @@ Next: **#8 device E2E** (retest against the Go server after the pending firmware
 - **Session exposure by name.** `cardputerme <name>` creates+exposes a session (`ensureSession`, adapter-side); zsh alias installed; launcher script backend-neutral. Auto-discovery + `/select`; 86/86 tests.
 - **#1–#3** (earlier): agnostic prompt detection · terminal adapter · named sessions/one server. See git log (`05be6b6`, `7f6ffc4`).
 
+## ⚠️ Security follow-up (needs the user)
+- **Wi-Fi creds were committed** (`firmware/.env`, `firmware/cardputer/.env` — SSID + password) and pushed to GitHub. Untracked + gitignored 2026-08-15, but they **remain in git history**. Untracking does NOT remove history. To fully remediate: (1) **rotate the Wi-Fi password**, and (2) optionally scrub history with `git filter-repo`/BFG + force-push (**destructive: rewrites all hashes, invalidates clones — user must confirm before I run it**). Also purged from tracking: `firmware/cardputer/.pio/` (1148 files, ~344 MB build cache; still in history too).
+
 ## Parked (post-focus — not now)
 PTY backend (drop-in via adapter; enables "expose ANY window" fully — run `cardputerme` inside a window to capture it); cursor-anchored prompt detection (tmux `#{cursor_y}` + styled-row); command snippets; session peek in picker; README truth-pass.
 
