@@ -28,7 +28,7 @@ Next: **#8 device E2E** (retest against the Go server after the pending firmware
 
 **📅 Day 3 — 2026-08-16/17 · Comfort**
 11. ⬜ **Zoom (server-owned font).** Display message gains `font`; device `setTextSize`; a ctrl-chord zooms; viewport dims derive from zoom.
-12. ⬜ **Processing status.** Prefer the tail row containing "esc to interrupt" (plain `.includes`) as status so Claude's live spinner/token line rides the marquee.
+12. ✅ **Processing status** *(done 2026-08-15, Go)* — `splitScreen` scans tail rows and prefers the most-recent one containing "esc to interrupt" (plain, case-insensitive) as the status, so an agent's live spinner/token line rides the marquee. TDD; 61 tests green. *(Verify on device with #8.)*
 13. ⬜ **History autosuggest + Tab accept.** While typing, ghost-render the newest history command matching the prefix (dim color); **Tab accepts** it (no suggestion → Tab passes to the terminal, server-decided). Avoids retyping repeated commands. Server-only, TDD.
 14. ⬜ **Terminal-fidelity pass (SSH-parity).** North star: Cardputer = ssh session, only difference is screen size. Audit against the REAL terminal side-by-side: (a) colors — device must show exactly the colors the terminal displays (extend `lib/ansi.js` coverage: bold/bright, 24-bit `38;2`, bg colors, reverse video); (b) layout — mirror the terminal's own structure (row order, spacing, input at bottom) rather than reshaping it. Verify with at least two different CLIs (e.g. an agent CLI + plain bash `ls --color`). Server-only, TDD.
 > 🚀 **Deploy (end of Day 3)** — zoom live; working-state always visible; colors faithful.
