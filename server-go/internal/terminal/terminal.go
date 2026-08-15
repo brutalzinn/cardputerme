@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,19 @@ import (
 	"syscall"
 	"time"
 )
+
+var ErrNoTmux = errors.New("tmux is not installed — cardputerme captures your terminal through it and cannot run without it (brew install tmux / apt install tmux)")
+
+func lookupTmux(look func(string) (string, error)) error {
+	if _, err := look("tmux"); err != nil {
+		return ErrNoTmux
+	}
+	return nil
+}
+
+func Available() error {
+	return lookupTmux(exec.LookPath)
+}
 
 var keyNames = map[string]string{
 	"enter":     "Enter",

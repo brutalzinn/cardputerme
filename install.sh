@@ -76,6 +76,14 @@ verify() {
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 
+if ! command -v tmux >/dev/null 2>&1 && [ -z "${CARDPUTERME_SKIP_TMUX_CHECK:-}" ]; then
+  printf 'cardputerme — tmux is not installed.\n' >&2
+  printf '  cardputerme captures your terminal through tmux and does nothing without it.\n' >&2
+  printf '  install it first:  brew install tmux   (macOS)   |   sudo apt install tmux   (Ubuntu)\n' >&2
+  printf '  then re-run this installer (or set CARDPUTERME_SKIP_TMUX_CHECK=1 to install anyway).\n' >&2
+  exit 1
+fi
+
 OS="$(detect_os)"
 ARCH="$(detect_arch)"
 BIN_DIR="$(pick_bin_dir)"
@@ -102,7 +110,5 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) say "add it to your PATH:  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc" ;;
 esac
-
-command -v tmux >/dev/null 2>&1 || say "tmux is required at runtime — install it (brew install tmux / apt install tmux)"
 
 say "run 'cardputerme' inside a tmux terminal, then pick it on the Cardputer"

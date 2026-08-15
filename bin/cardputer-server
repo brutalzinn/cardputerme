@@ -3,8 +3,19 @@ set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 DIR="$PWD"
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "cardputerme — tmux is not installed." >&2
+  echo "  cardputerme captures your terminal through tmux and cannot run without it." >&2
+  echo "  install it:  brew install tmux   (macOS)   |   sudo apt install tmux   (Ubuntu)" >&2
+  exit 1
+fi
 NAME="${1:-${NAME:-$(basename "$PWD")}}"
 TMUX_SESSION="${TMUX_SESSION:-$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "$NAME")}"
+if [ -z "$TMUX" ]; then
+  echo "cardputerme — this terminal is not inside tmux, so there is nothing to mirror yet." >&2
+  echo "  exposing a NEW empty terminal named '$NAME'." >&2
+  echo "  to mirror the terminal you are working in, start it inside tmux:  tmux new -s $NAME" >&2
+fi
 STATE="${CARDPUTERME_DIR:-$HOME/.cardputerme}"
 mkdir -p "$STATE"
 PID_FILE="$STATE/$NAME.pid"

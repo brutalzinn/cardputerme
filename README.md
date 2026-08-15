@@ -27,7 +27,7 @@ The device is a thin renderer: the server owns the input buffer, history, viewpo
 
 ## Install
 
-**Requirement:** `tmux` (`brew install tmux` / `apt install tmux`) — the invisible capture backend; you never interact with it directly.
+**Requirement:** `tmux` (`brew install tmux` / `apt install tmux`) — the invisible capture backend; you never interact with it directly. It is not optional: the installer, the launcher and the server each refuse to run without it. Run `cardputerme` **from inside a tmux terminal** — outside one there is nothing to mirror, so it says so and exposes a new empty terminal instead.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh

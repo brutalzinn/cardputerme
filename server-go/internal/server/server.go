@@ -523,11 +523,19 @@ func (s *Server) startBeacon(port int) {
 // Run exposes the configured terminal: pick a port, ensure the session, start
 // the beacon + event-driven push, and serve until the terminal dies.
 func (s *Server) Run() error {
+	if err := terminal.Available(); err != nil {
+		return err
+	}
 	port := discovery.PickPort(discovery.FreePort, portStart, portTries)
 	if port == 0 {
 		return fmt.Errorf("no free port between %d and %d", portStart, portStart+portTries-1)
 	}
-	s.backend.EnsureSession(s.cfg.SessionCwd)
+	if !s.backend.Exists() {
+		log.Printf("[expose] no terminal '%s' was running — created an empty one; run cardputerme from inside the terminal you want mirrored", tmuxTarget(s.cfg))
+	}
+	if !s.backend.EnsureSession(s.cfg.SessionCwd) {
+		return fmt.Errorf("could not attach to or create terminal '%s'", tmuxTarget(s.cfg))
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.healthHandler)
