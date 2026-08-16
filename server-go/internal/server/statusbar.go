@@ -19,10 +19,7 @@ func statusBar(bat, name, title, hint string, row, maxRow, col, size int) string
 	tail := counters(row, maxRow, col, size)
 
 	middle := strings.Join(nonEmpty(title, hint), "  ")
-	budget := statusMax - len([]rune(head)) - len([]rune(tail)) - 4
-	if budget < 0 {
-		budget = 0
-	}
+	budget := max(0, statusMax-len([]rune(head))-len([]rune(tail))-4)
 	return strings.Join(nonEmpty(head, clip(middle, budget), tail), "  ")
 }
 

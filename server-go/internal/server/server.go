@@ -400,11 +400,12 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	// newer, nicer home, but this line is the one EVERY firmware renders, so a
 	// value the user has to be able to trust must not depend on which build is
 	// on the device.
-	bar := statusBar(s.batteryLabelLocked(), s.cfg.Name, title, hint, s.sess.view.Row, maxRow, s.sess.view.Col, s.size)
+	bat := s.batteryLabelLocked()
+	bar := statusBar(bat, s.cfg.Name, title, hint, s.sess.view.Row, maxRow, s.sess.view.Col, s.size)
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: bar, header: s.headerCellsLocked(), size: s.size, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: bar, header: s.headerCellsFor(bat), size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;

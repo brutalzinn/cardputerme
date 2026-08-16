@@ -28,6 +28,8 @@ func (s *Server) applyWifi(up *bool) {
 	s.mu.Unlock()
 }
 
+// deviceKnown exists only so the log fires on a real transition rather than on
+// the first report of every reconnect.
 func (s *Server) noteHeaderCapable(capable bool) {
 	s.mu.Lock()
 	known, was := s.deviceKnown, s.deviceHeader
@@ -47,7 +49,7 @@ func (s *Server) noteHeaderCapable(capable bool) {
 func (s *Server) deviceRendersHeader() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.deviceKnown && s.deviceHeader
+	return s.deviceHeader
 }
 
 func wifiCell(up bool) screen.Cell {
@@ -67,16 +69,22 @@ func (s *Server) headerCells() []screen.Cell {
 // WiFi is a fact the device REPORTS; whether and how to show it is decided
 // here, so it can change without a re-flash (#45).
 func (s *Server) headerCellsLocked() []screen.Cell {
+	return s.headerCellsFor(s.batteryLabelLocked())
+}
+
+func (s *Server) headerCellsFor(bat string) []screen.Cell {
 	cells := []screen.Cell{}
 	if text := s.alertTextLocked(); text != "" {
 		cells = append(cells, screen.Cell{Text: text + " ", Color: screen.Colors.Ask})
 	}
 	cells = append(cells, wifiCell(s.wifi))
-	return append(cells, batteryCell(battery.Label(s.gauge.Status())))
+	return append(cells, batteryCell(bat))
 }
 
-// batteryLabelLocked is the one place the placeholder decision lives, so the
-// header and the status bar can never disagree about what "unknown" looks like.
+// batteryLabelLocked is the one place the placeholder decision lives. Both the
+// header and the status bar go through it, and a frame reads it ONCE — reading
+// the gauge twice let a report land in between and put two different
+// percentages in the same frame.
 func (s *Server) batteryLabelLocked() string {
 	if label := battery.Label(s.gauge.Status()); label != "" {
 		return label
@@ -88,8 +96,8 @@ func (s *Server) batteryLabelLocked() string {
 // cannot be read at a glance. An unknown one is drawn dim and as a placeholder,
 // never as 0% — an unread battery is not a flat one.
 func batteryCell(label string) screen.Cell {
-	if label == "" {
-		return screen.Cell{Text: "  " + unknownBattery, Color: screen.Colors.Dim}
+	if label == unknownBattery {
+		return screen.Cell{Text: "  " + label, Color: screen.Colors.Dim}
 	}
 	return screen.Cell{Text: "  " + label, Color: screen.Colors.Status}
 }

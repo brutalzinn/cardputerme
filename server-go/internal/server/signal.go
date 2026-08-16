@@ -21,7 +21,8 @@ type led struct {
 var (
 	ledOff       = led{}
 	ledAttention = led{R: 255, G: 60, B: 0, Pattern: "pulse"}
-	ledWaiting   = led{R: 255, G: 60, B: 0, Pattern: "solid"}
+	ledInfo      = led{R: 0, G: 80, B: 255, Pattern: "solid"}
+	ledUrgent    = led{R: 255, G: 0, B: 0, Pattern: "solid"}
 )
 
 func ledMessage(l led) string {

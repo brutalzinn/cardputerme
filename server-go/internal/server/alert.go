@@ -3,19 +3,29 @@ package server
 import (
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"cardputerme/internal/screen"
 )
 
 // defaultAlert is what a caller with nothing to say still gets. Silence would
 // make an alert indistinguishable from a bug.
 const defaultAlert = "needs you"
 
-// alertWidth keeps the alert from eating the rest of the header. The device
-// header holds ~40 characters at text size 1, and WiFi plus the battery take
-// about eleven of them.
-const alertWidth = 26
+// headerCols is what the device header holds at text size 1: 240px over a 6px
+// font. A server-side constant standing in for a device fact — the device should
+// report it, the way it reports usb/mv/wifi. Until it does, changing the board
+// or the font silently mis-clips.
+const headerCols = 40
+
+// alertWidth is what is left for the alert once the widest possible WiFi cell
+// ("NoWiFi", 6) and battery cell ("  +100%", 7) plus a separating space are
+// taken out of headerCols. The "!n" count lives INSIDE this budget — it was
+// added afterwards and pushed the battery off the screen.
+const alertWidth = headerCols - 6 - 7 - 1
 
 // maxAlerts bounds the inbox. A pager that remembers everything forever is a
 // log; what the user needs is the newest line and an honest count.
@@ -32,11 +42,12 @@ type alertRequest struct {
 	Level   string `json:"level"`
 }
 
-// alert is one unanswered request for the human.
+// alert is one unanswered request for the human. The line is kept in FULL:
+// clipping at store time destroyed the text forever, so no wider render — or
+// /health — could ever recover it. Width is a render-time concern.
 type alert struct {
 	session string
 	line    string
-	at      time.Time
 }
 
 // raiseAlert is the ONE way anything asks for the human — Claude Code, a CI job,
@@ -47,8 +58,8 @@ type alert struct {
 // discard the alert outright, so silencing the device also destroyed the record
 // of who wanted you — silence must mean "make no noise", never "throw away".
 func (s *Server) raiseAlert(session, text string, l level) bool {
-	line := alertLine(session, text)
-	s.queueAlert(session, clip(line, alertWidth))
+	line := screen.ToAscii(alertLine(session, text))
+	s.queueAlert(session, line)
 	if !s.NotifyEnabled() {
 		log.Printf("[notify] %q queued silently (;notify 0)", line)
 		s.schedulePush()
@@ -71,10 +82,9 @@ func (s *Server) queueAlert(session, line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if n := len(s.alerts); n > 0 && s.alerts[n-1].session == session && s.alerts[n-1].line == line {
-		s.alerts[n-1].at = time.Now()
 		return
 	}
-	s.alerts = append(s.alerts, alert{session: session, line: line, at: time.Now()})
+	s.alerts = append(s.alerts, alert{session: session, line: line})
 	if len(s.alerts) > maxAlerts {
 		s.alerts = s.alerts[len(s.alerts)-maxAlerts:]
 	}
@@ -91,33 +101,43 @@ func (s *Server) waiting() int {
 // projects you have not looked at yet.
 func (s *Server) clearSession(name string) {
 	s.mu.Lock()
-	kept := []alert{}
-	for _, a := range s.alerts {
-		if a.session != name {
-			kept = append(kept, a)
-		}
-	}
-	changed := len(kept) != len(s.alerts)
-	s.alerts = kept
+	before := len(s.alerts)
+	s.alerts = slices.DeleteFunc(s.alerts, func(a alert) bool { return s.answeredLocked(a, name) })
+	changed := len(s.alerts) != before
 	s.mu.Unlock()
 	if changed {
 		s.schedulePush()
 	}
 }
 
+// answeredLocked decides what a keypress just answered. The session on screen,
+// obviously — but also any alert naming a session this machine does not have.
+// Those are UNADDRESSABLE: raiseAlert accepts any name, so a CI job or a cron
+// can post one, and there is no session to switch to and clear it. Without this
+// they were immortal, inflating the count and holding a dead line in the header
+// forever.
+func (s *Server) answeredLocked(a alert, viewing string) bool {
+	if a.session == viewing {
+		return true
+	}
+	_, known := s.sessions[a.session]
+	return !known
+}
+
 // alertTextLocked is what the device shows: the newest line, plus a count of
-// everything else still waiting. "3 waiting" is nine characters the 39-column
-// status bar cannot afford, so it is "!3".
+// everything else still waiting. "3 waiting" is nine characters the header
+// cannot afford, so it is "!3" — and the count is inside the width budget, not
+// added on top of it.
 func (s *Server) alertTextLocked() string {
 	n := len(s.alerts)
 	if n == 0 {
 		return ""
 	}
-	newest := s.alerts[n-1].line
-	if n == 1 {
-		return newest
+	suffix := ""
+	if n > 1 {
+		suffix = " !" + strconv.Itoa(n)
 	}
-	return newest + " !" + strconv.Itoa(n)
+	return clip(s.alerts[n-1].line, alertWidth-len([]rune(suffix))) + suffix
 }
 
 func alertLine(session, text string) string {

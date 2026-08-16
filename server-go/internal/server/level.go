@@ -24,41 +24,39 @@ type note struct {
 // and tone() restarts on arrival, so the SERVER paces them.
 const burstGap = 180 * time.Millisecond
 
+// levels is the whole vocabulary in one place, so adding a level is one row
+// rather than four edits nothing would check.
+//
+// The LED carries urgency by COLOUR because only three behaviours exist on the
+// device — off, pulse, and solid (anything else) — and the pulse PERIOD is a
+// compile-time constant there.
+//
+// Exactly one level may use the wav: the device caches ONE by URL and
+// re-downloads it over blocking HTTP whenever the URL changes, so a second
+// would thrash the cache and stall rendering mid-frame.
+var levels = [...]struct {
+	name  string
+	led   led
+	tones []note
+	wav   bool
+}{
+	attention: {"attention", ledAttention, []note{{1200, 90}}, true},
+	info:      {"info", ledInfo, []note{{880, 60}}, false},
+	urgent:    {"urgent", ledUrgent, []note{{1600, 70}, {1900, 70}, {2300, 120}}, false},
+}
+
+// levelOf falls back to attention, which is why it is the zero value: an absent
+// or misspelled level must behave exactly as callers did before levels existed.
 func levelOf(name string) level {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "info":
-		return info
-	case "urgent":
-		return urgent
+	want := strings.ToLower(strings.TrimSpace(name))
+	for i, l := range levels {
+		if l.name == want {
+			return level(i)
+		}
 	}
 	return attention
 }
 
-// led picks a colour and pattern the deployed firmware can already draw. Only
-// three behaviours exist on the device — off, pulse, and solid (anything else)
-// — and the pulse PERIOD is a compile-time constant, so urgency has to be
-// carried by colour rather than by blink rate.
-func (l level) led() led {
-	if l == info {
-		return led{R: 0, G: 80, B: 255, Pattern: "solid"}
-	}
-	if l == urgent {
-		return led{R: 255, G: 0, B: 0, Pattern: "solid"}
-	}
-	return ledAttention
-}
-
-// usesWav is true for exactly one level. The device caches ONE wav by URL and
-// re-downloads over blocking HTTP whenever the URL changes, so a second wav
-// would thrash the cache and stall rendering. Distinction is by tone instead.
-func (l level) usesWav() bool { return l == attention }
-
-func (l level) tones() []note {
-	if l == info {
-		return []note{{freq: 880, ms: 60}}
-	}
-	if l == urgent {
-		return []note{{freq: 1600, ms: 70}, {freq: 1900, ms: 70}, {freq: 2300, ms: 120}}
-	}
-	return []note{{freq: 1200, ms: 90}}
-}
+func (l level) led() led      { return levels[l].led }
+func (l level) tones() []note { return levels[l].tones }
+func (l level) usesWav() bool { return levels[l].wav }
