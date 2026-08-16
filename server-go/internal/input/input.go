@@ -3,15 +3,18 @@ package input
 import "strings"
 
 type State struct {
-	Input string
-	Hist  int // -1 = none
-	Cmd   string
+	Input   string
+	Hist    int // -1 = none
+	Cmd     string
+	Picking bool
+	Pick    int
 }
 
 type Action struct {
 	Kind   string
 	Key    string
 	Text   string
+	Index  int
 	Repeat bool // safe to fire again while the key is held
 }
 
@@ -23,6 +26,7 @@ type Result struct {
 type KeyCtx struct {
 	Awaiting bool
 	History  []string
+	Beacons  int
 }
 
 func isDigits(text string) bool {
@@ -82,7 +86,44 @@ func commandKey(state State, key string) Result {
 	return typing(state.Cmd)
 }
 
+const PickerKey = "fn+esc"
+
+func pickerKey(state State, key string, ctx KeyCtx) Result {
+	stay := func(pick int) Result {
+		return Result{State{Input: state.Input, Hist: state.Hist, Picking: true, Pick: pick}, Action{Kind: "none"}}
+	}
+	leave := func(a Action) Result {
+		return Result{State{Input: state.Input, Hist: state.Hist}, a}
+	}
+	if key == "esc" || key == PickerKey {
+		return leave(Action{Kind: "none"})
+	}
+	if ctx.Beacons <= 0 {
+		return stay(state.Pick)
+	}
+	if key == "up" || key == "down" {
+		delta := 1
+		if key == "up" {
+			delta = -1
+		}
+		return stay(((state.Pick+delta)%ctx.Beacons + ctx.Beacons) % ctx.Beacons)
+	}
+	if key == "enter" {
+		return leave(Action{Kind: "connect", Index: state.Pick})
+	}
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		return leave(Action{Kind: "connectRow", Index: int(key[0] - '1')})
+	}
+	return stay(state.Pick)
+}
+
 func InterpretKey(state State, key string, ctx KeyCtx) Result {
+	if state.Picking {
+		return pickerKey(state, key, ctx)
+	}
+	if key == PickerKey {
+		return Result{State{Input: state.Input, Hist: state.Hist, Picking: true}, Action{Kind: "none"}}
+	}
 	if state.Cmd != "" {
 		return commandKey(state, key)
 	}

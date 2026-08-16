@@ -60,7 +60,6 @@ WiFiUDP g_udp;
 struct Found { IPAddress ip; uint16_t port; String name; unsigned long seen; };
 std::vector<Found> g_found;
 bool g_haveTarget = false;
-bool g_autoConnect = true;
 IPAddress g_targetIp;
 uint16_t g_targetPort = 0;
 String g_targetName = "";
@@ -224,7 +223,7 @@ int foundIndex(const IPAddress& ip, uint16_t port) {
   return -1;
 }
 
-void drawServerList() {
+void drawSearching() {
   auto& d = M5Cardputer.Display;
   d.fillScreen(COL_BG);
   drawHeader();
@@ -233,25 +232,11 @@ void drawServerList() {
   d.setCursor(3, HEADER_H + 4);
   d.print("cardputerme");
   d.setTextSize(1);
-  if (g_found.empty()) {
-    d.setTextColor(COL_DIM, COL_BG);
-    d.setCursor(3, HEADER_H + 28);
-    d.print("Listening for terminals...");
-    d.setCursor(3, HEADER_H + 40);
-    d.print("On the computer: cardputerme");
-    return;
-  }
-  int y = HEADER_H + 26;
-  for (size_t i = 0; i < g_found.size() && i < 9; i++) {
-    if (y + 22 > bodyBottom()) break;
-    d.setTextColor(COL_TEXT, COL_BG);
-    d.setCursor(3, y);
-    d.print(String((int)i + 1) + ". " + g_found[i].name);
-    d.setTextColor(COL_DIM, COL_BG);
-    d.setCursor(15, y + 10);
-    d.print(g_found[i].ip.toString() + ":" + String(g_found[i].port));
-    y += 24;
-  }
+  d.setTextColor(COL_DIM, COL_BG);
+  d.setCursor(3, HEADER_H + 28);
+  d.print("Listening for terminals...");
+  d.setCursor(3, HEADER_H + 40);
+  d.print("On the computer: cardputerme");
 }
 
 void connectToFound(int idx) {
@@ -271,12 +256,11 @@ void connectToFound(int idx) {
 
 void leaveServer() {
   g_haveTarget = false;
-  g_autoConnect = false;
   wsConnected = false;
   webSocket.disconnect();
   g_lines.clear();
   g_status = "";
-  drawServerList();
+  drawSearching();
 }
 
 void pollBeacons() {
@@ -443,6 +427,20 @@ void sendEvent(const char* type) {
   sendDoc(doc);
 }
 
+void sendBeacons() {
+  if (!wsConnected) return;
+  JsonDocument doc;
+  doc["type"] = "beacons";
+  JsonArray list = doc["list"].to<JsonArray>();
+  for (size_t i = 0; i < g_found.size(); i++) {
+    JsonObject o = list.add<JsonObject>();
+    o["name"] = g_found[i].name;
+    o["ip"] = g_found[i].ip.toString();
+    o["port"] = g_found[i].port;
+  }
+  sendDoc(doc);
+}
+
 void sendReport(bool usb, int mv) {
   if (!wsConnected) return;
   JsonDocument doc;
@@ -509,6 +507,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       showToast("Connected");
       redraw();
       reportSupply(true);
+      sendBeacons();
       break;
     case WStype_DISCONNECTED:
       wsConnected = false;
@@ -522,6 +521,13 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       const char* t = doc["type"] | "";
       if (strcmp(t, "display") == 0) { applyDisplay(doc); return; }
       if (strcmp(t, "power") == 0) { applyPower(powerFromName(doc["state"] | "on")); return; }
+      if (strcmp(t, "connect") == 0) {
+        IPAddress ip;
+        if (!ip.fromString((const char*)(doc["ip"] | ""))) return;
+        int idx = foundIndex(ip, (uint16_t)(doc["port"] | 0));
+        if (idx >= 0) connectToFound(idx);
+        return;
+      }
       if (strcmp(t, "led") == 0) { applyLed(doc); return; }
       if (strcmp(t, "sound") == 0) { applySound(doc); return; }
       if (strcmp(t, "notify") == 0) {
@@ -599,11 +605,8 @@ String currentKey(const Keyboard_Class::KeysState& st) {
 
 void handleKeys(const Keyboard_Class::KeysState& st) {
   for (char c : st.word) {
-    if (st.fn && (c == '`' || c == '~')) { leaveServer(); return; }
-    if (!g_haveTarget) {
-      if (c >= '1' && c <= '9') connectToFound(c - '1');
-      continue;
-    }
+    if (st.fn && (c == '`' || c == '~')) { sendKey("fn+esc"); return; }
+    if (!g_haveTarget) continue;
     sendKey(keyFor(st, c).c_str());
   }
   if (!g_haveTarget) return;
@@ -638,7 +641,7 @@ void setup() {
   g_udp.begin(BEACON_PORT);
   webSocket.onEvent(onWsEvent);
   webSocket.setReconnectInterval(3000);
-  drawServerList();
+  drawSearching();
 }
 
 void loop() {
@@ -647,11 +650,9 @@ void loop() {
 
   pollBeacons();
   expireFound();
-  if (!g_haveTarget) {
-    if (g_autoConnect && g_found.size() == 1) connectToFound(0);
-    if (!g_haveTarget && g_listDirty) { g_listDirty = false; drawServerList(); }
-  }
-  if (g_haveTarget && g_listDirty) g_listDirty = false;
+  if (!g_haveTarget && !g_found.empty()) connectToFound(0);
+  if (!g_haveTarget && g_listDirty) { g_listDirty = false; drawSearching(); }
+  if (g_listDirty && wsConnected) { g_listDirty = false; sendBeacons(); }
   if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
 
   if (g_haveTarget && wsConnected) tickSupply();

@@ -98,6 +98,9 @@ type Server struct {
 	lastAwaiting bool
 	soundBase    string
 	lastLed      string
+	beacons      []beacon
+	picking      bool
+	pick         int
 
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
@@ -276,6 +279,16 @@ func (s *Server) screenLines(text string) []screen.Line {
 }
 
 func (s *Server) composeMirror(grid []screen.Line, status, title string, awaiting bool) stateResult {
+	if s.picking {
+		cols, rows := s.cols(), s.rows()
+		s.pick = clamp(s.pick, 0, max(0, len(s.beacons)-1))
+		return stateResult{
+			lines:         pickerLines(s.beacons, s.pick, rows, cols),
+			status:        pickerStatus(s.beacons, s.pick),
+			size:          s.size,
+			sessionExists: true,
+		}
+	}
 	maxLen := 0
 	for _, l := range grid {
 		if rl := len([]rune(l.Text)); rl > maxLen {
@@ -453,11 +466,18 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.setLed(ledOff)
 	s.mu.Lock()
 	s.reply = ""
-	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
+	res := input.InterpretKey(
+		input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd, Picking: s.picking, Pick: s.pick},
+		key,
+		input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history, Beacons: len(s.beacons)},
+	)
 	s.input = res.State.Input
 	s.cmd = res.State.Cmd
 	s.hist = res.State.Hist
+	s.picking = res.State.Picking
+	s.pick = res.State.Pick
 	a := res.Action
+	connect := s.resolveConnect(a)
 	switch a.Kind {
 	case "pan":
 		for i := 0; i < times; i++ {
@@ -492,6 +512,11 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		}
 	}
 	s.mu.Unlock()
+
+	if connect != "" {
+		log.Printf("[picker] %s", connect)
+		s.hub.broadcast(connect)
+	}
 
 	switch a.Kind {
 	case "send":
@@ -596,12 +621,13 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var m struct {
-			Type   string `json:"type"`
-			Key    string `json:"key"`
-			Text   string `json:"text"`
-			State  string `json:"state"`
-			Usb    bool   `json:"usb"`
-			Mv     int    `json:"mv"`
+			Type   string   `json:"type"`
+			Key    string   `json:"key"`
+			Text   string   `json:"text"`
+			State  string   `json:"state"`
+			Usb    bool     `json:"usb"`
+			Mv     int      `json:"mv"`
+			List   []beacon `json:"list"`
 			Events []struct {
 				Key   string `json:"key"`
 				State string `json:"state"`
@@ -613,6 +639,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		switch m.Type {
 		case "report":
 			s.handleReport(m.Usb, m.Mv, time.Now())
+		case "beacons":
+			s.handleBeacons(m.List)
 		case "wake":
 			s.applyPower(s.power.Wake(time.Now()))
 		case "sleep":
