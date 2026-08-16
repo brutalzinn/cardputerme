@@ -1,6 +1,8 @@
 package server
 
 import (
+	"cardputerme/internal/settings"
+
 	"fmt"
 	"log"
 	"net/http"
@@ -77,6 +79,15 @@ func (s *Server) SetNotify(v bool) {
 	log.Printf("[notify] alerts %s", map[bool]string{true: "on", false: "off"}[v])
 	if !v {
 		s.setLed(ledOff)
+	}
+	// Persist so the choice survives a restart — the setting is useless if the
+	// user must make it again every time the server comes back. An empty path
+	// means no persistence, which keeps tests off the real state dir.
+	if s.cfg.SettingsPath == "" {
+		return
+	}
+	if err := (settings.Settings{Notify: v}).Save(s.cfg.SettingsPath); err != nil {
+		log.Printf("[settings] could not persist notify=%v: %v", v, err)
 	}
 }
 

@@ -7,6 +7,9 @@ import (
 )
 
 const portFile = "server.port"
+const settingsFile = "settings.json"
+
+func settingsPath() string { return filepath.Join(stateDir(), settingsFile) }
 
 func stateDir() string {
 	if dir := os.Getenv("CARDPUTERME_DIR"); dir != "" {

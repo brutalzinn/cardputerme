@@ -1,8 +1,11 @@
 package server
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"cardputerme/internal/settings"
 )
 
 func TestNotifyCommandSilencesEveryChannel(t *testing.T) {
@@ -43,5 +46,42 @@ func TestHealthReportsTheLiveNotifyValue(t *testing.T) {
 	// /health must not report the startup Config copy
 	if s.cfg.Notify == s.NotifyEnabled() {
 		t.Skip("config and live value coincide; nothing to distinguish")
+	}
+}
+
+// Tests must never read or write the developer's real state. They did: a test
+// calling SetNotify(false) persisted notify=false into ~/.cardputerme, which
+// then leaked into unrelated tests. An empty SettingsPath means no disk at all.
+func TestNoPersistenceWithoutAnExplicitPath(t *testing.T) {
+	s := withSession(New(Config{Name: "n", Session: "n", WrapCols: 20, Notify: true}))
+	if s.cfg.SettingsPath != "" {
+		t.Fatal("test servers must not be pointed at a real settings file")
+	}
+	s.SetNotify(false) // must not touch disk
+	if s.NotifyEnabled() {
+		t.Fatal("the in-memory switch must still work")
+	}
+}
+
+func TestPersistenceRoundTripsThroughAnExplicitPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	s := withSession(New(Config{Name: "n", Session: "n", WrapCols: 20, Notify: true, SettingsPath: path}))
+	s.SetNotify(false)
+
+	again := New(Config{Name: "n", Session: "n", WrapCols: 20, Notify: true, SettingsPath: path})
+	if again.NotifyEnabled() {
+		t.Fatal("`;notify 0` must survive a restart")
+	}
+}
+
+func TestAnExplicitEnvOverrideBeatsTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := (settings.Settings{Notify: false}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOTIFY", "1")
+	s := New(Config{Name: "n", WrapCols: 20, Notify: true, SettingsPath: path})
+	if !s.NotifyEnabled() {
+		t.Fatal("an explicitly set env var is a deliberate one-off override for this process")
 	}
 }

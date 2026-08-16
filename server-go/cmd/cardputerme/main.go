@@ -45,6 +45,14 @@ func envList(key, def string) []string {
 	return out
 }
 
+func defaultSettingsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cardputerme", "settings.json")
+}
+
 func defaultSoundsDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -81,6 +89,7 @@ func main() {
 		PushDebounce:    time.Duration(envInt("PUSH_DEBOUNCE_MS", 15)) * time.Millisecond,
 		IdleExit:        time.Duration(envInt("IDLE_EXIT_H", 12)) * time.Hour,
 		SoundsDir:       envStr("SOUNDS_DIR", defaultSoundsDir()),
+		SettingsPath:    envStr("SETTINGS_PATH", defaultSettingsPath()),
 		NotifySound:     envStr("NOTIFY_SOUND", "notify.wav"),
 		UsbMilliVolts:   envInt("USB_MV", 4200),
 		HidePrefixes:    envList("HIDE_PREFIXES", "Tip:"),

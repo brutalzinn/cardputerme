@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"cardputerme/internal/power"
 	"cardputerme/internal/repeat"
 	"cardputerme/internal/screen"
+	"cardputerme/internal/settings"
 	"cardputerme/internal/terminal"
 
 	"github.com/gorilla/websocket"
@@ -57,6 +59,7 @@ type Config struct {
 	UsbMilliVolts   int
 	IdleExit        time.Duration
 	SoundsDir       string
+	SettingsPath    string
 	NotifySound     string
 	HidePrefixes    []string
 }
@@ -142,6 +145,23 @@ func sessionTarget(cfg Config) string {
 	return cfg.Name
 }
 
+// startingNotify resolves env-vs-file precedence: an explicitly set env var is a
+// deliberate one-off override for THIS process, otherwise the persisted choice
+// wins. Recorded here because it will otherwise be forgotten.
+//
+// An empty SettingsPath means "do not touch disk at all" — tests must never
+// read or write the developer's real ~/.cardputerme/settings.json, which they
+// did until this was made explicit.
+func startingNotify(cfg Config) bool {
+	if cfg.SettingsPath == "" {
+		return cfg.Notify
+	}
+	if _, explicit := os.LookupEnv("NOTIFY"); explicit {
+		return cfg.Notify
+	}
+	return settings.Load(cfg.SettingsPath).Notify
+}
+
 func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
@@ -151,7 +171,7 @@ func New(cfg Config) *Server {
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		size:     baseSize,
-		notify:   cfg.Notify,
+		notify:   startingNotify(cfg),
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
 		gauge:    battery.NewGauge(batteryPolicy),
