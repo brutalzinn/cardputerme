@@ -55,7 +55,7 @@ func TestGridLines(t *testing.T) {
 }
 
 func TestSplitScreen(t *testing.T) {
-	grid, status, _ := splitScreen("line one\nline two\n\n")
+	grid, status, _ := splitScreen("line one\nline two\n\n", nil)
 	if status != "line two" {
 		t.Fatalf("status %q", status)
 	}
@@ -65,14 +65,14 @@ func TestSplitScreen(t *testing.T) {
 }
 
 func TestSplitScreenPrefersInterruptRow(t *testing.T) {
-	_, status, _ := splitScreen("building the thing\n✳ Baking… (esc to interrupt)\n$ ")
+	_, status, _ := splitScreen("building the thing\n✳ Baking… (esc to interrupt)\n$ ", nil)
 	if status != "Baking... (esc to interrupt)" {
 		t.Fatalf("status %q", status)
 	}
 }
 
 func TestSplitScreenFallsBackToLastRow(t *testing.T) {
-	_, status, _ := splitScreen("line one\nline two\n")
+	_, status, _ := splitScreen("line one\nline two\n", nil)
 	if status != "line two" {
 		t.Fatalf("status %q", status)
 	}

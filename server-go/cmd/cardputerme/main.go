@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"cardputerme/internal/server"
@@ -32,6 +33,16 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+func envList(key, def string) []string {
+	out := []string{}
+	for _, p := range strings.Split(envStr(key, def), ",") {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func envStr(key, def string) string {
@@ -61,6 +72,7 @@ func main() {
 		RepeatInterval:  time.Duration(envInt("REPEAT_INTERVAL_MS", 90)) * time.Millisecond,
 		PushDebounce:    time.Duration(envInt("PUSH_DEBOUNCE_MS", 15)) * time.Millisecond,
 		UsbMilliVolts:   envInt("USB_MV", 4200),
+		HidePrefixes:    envList("HIDE_PREFIXES", "Tip:"),
 	}
 	if err := server.New(cfg).Run(); err != nil {
 		log.Fatal(err)

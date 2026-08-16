@@ -53,6 +53,7 @@ type Config struct {
 	RepeatInterval  time.Duration
 	PushDebounce    time.Duration
 	UsbMilliVolts   int
+	HidePrefixes    []string
 }
 
 type mirrorCache struct {
@@ -186,7 +187,7 @@ func framedRows(rows []string) map[int]bool {
 	return hidden
 }
 
-func splitScreen(pane string) ([]screen.Line, string, string) {
+func splitScreen(pane string, hide []string) ([]screen.Line, string, string) {
 	rows := strings.Split(pane, "\n")
 	last := -1
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -209,7 +210,7 @@ func splitScreen(pane string) ([]screen.Line, string, string) {
 	title := ""
 	hidden := framedRows(rows[:last])
 	for i, raw := range rows[:last] {
-		if hidden[i] {
+		if hidden[i] || screen.StartsWithAny(raw, hide) {
 			continue
 		}
 		label, isRule := screen.RuleTitle(raw)
@@ -311,7 +312,7 @@ func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
 		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", size: s.size}
 	}
-	grid, status, title := splitScreen(pane)
+	grid, status, title := splitScreen(pane, s.cfg.HidePrefixes)
 	// Detect a prompt over the SAME blank-trimmed content the device shows (the
 	// grid + status row), not the raw tail — a menu with blank lines below it
 	// would otherwise fall outside the last-N raw rows and be missed.
