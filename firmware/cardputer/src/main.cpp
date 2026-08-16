@@ -46,7 +46,7 @@ const unsigned long BEACON_TTL_MS = 6500;
 struct Line { String text; uint16_t color; };
 std::vector<Line> g_lines;
 String   g_status = "";
-String   g_badge = "";
+std::vector<Line> g_header;
 uint16_t g_statusColor = COL_ACCENT;
 bool     g_sessionExists = false;
 int      g_page = 0;
@@ -74,14 +74,6 @@ PowerState g_power = POWER_ON;
 #define BRIGHT_ON   255
 #define BRIGHT_DIM  40
 #define BRIGHT_OFF  0
-
-String toast = "";
-unsigned long toastUntil = 0;
-
-void showToast(const String& msg, uint16_t ms = 1200) {
-  toast = msg;
-  toastUntil = millis() + ms;
-}
 
 bool wifiUp() { return WiFi.status() == WL_CONNECTED; }
 
@@ -114,28 +106,24 @@ void connectWifi() {
   M5Cardputer.Display.fillScreen(COL_BG);
 }
 
+// The header is composed by the server and drawn here verbatim. The device
+// decides nothing about what it says, so changing it costs a server restart
+// and never a re-flash (#45). The only local text is the fallback below, for
+// the one case no server can speak to: there is no server.
 void drawHeader() {
   auto& d = M5Cardputer.Display;
   d.fillRect(0, 0, SCR_W, HEADER_H, COL_HDR);
   d.setTextSize(1);
-
-  d.setTextColor(wifiUp() ? COL_OK : COL_WARN, COL_HDR);
   d.setCursor(3, 4);
-  d.print(wifiUp() ? "WiFi" : "NoWiFi");
-  d.setTextColor(COL_ACCENT, COL_HDR);
-  d.print(wsConnected ? " LIVE" : " ....");
-
-  if (millis() < toastUntil && toast.length()) {
-    d.setTextColor(COL_OK, COL_HDR);
-    d.setCursor(66, 4);
-    d.print(toast);
+  if (g_header.empty()) {
+    d.setTextColor(COL_WARN, COL_HDR);
+    d.print(wifiUp() ? "connecting..." : "no wifi");
+    return;
   }
-
-  String pos = String(g_lines.empty() ? 0 : g_page + 1) + "/" + String(pageCount());
-  String tail = g_badge.length() ? g_badge + " " + pos : pos;
-  d.setCursor(SCR_W - (int)tail.length() * 6 - 3, 4);
-  d.setTextColor(COL_OK, COL_HDR);
-  d.print(tail);
+  for (size_t i = 0; i < g_header.size(); i++) {
+    d.setTextColor(g_header[i].color, COL_HDR);
+    d.print(g_header[i].text);
+  }
 }
 
 void drawScrollbar() {
@@ -249,7 +237,6 @@ void connectToFound(int idx) {
   g_status = "";
   webSocket.disconnect();
   webSocket.begin(g_targetIp.toString(), g_targetPort, WS_PATH);
-  showToast(g_targetName);
   M5Cardputer.Display.fillScreen(COL_BG);
   redraw();
 }
@@ -412,7 +399,13 @@ void applySound(JsonDocument& doc) {
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
   g_size = doc["size"] | 2;
-  g_badge = String((const char*)(doc["badge"] | ""));
+  g_header.clear();
+  for (JsonObject o : doc["header"].as<JsonArray>()) {
+    Line cell;
+    cell.text = String((const char*)(o["text"] | ""));
+    cell.color = (uint16_t)((uint32_t)(o["color"] | (uint32_t)COL_TEXT));
+    g_header.push_back(cell);
+  }
   JsonObject status = doc["status"];
   String newStatus = String((const char*)(status["text"] | ""));
   if (newStatus != g_status) g_statusOffset = 0;
@@ -470,6 +463,7 @@ void sendReport(bool usb, int mv) {
   JsonDocument doc;
   doc["type"] = "report";
   doc["usb"] = usb;
+  doc["wifi"] = wifiUp();
   doc["mv"] = mv;
   doc["battery"] = M5Cardputer.Power.getBatteryLevel();
   doc["heap"] = (int)ESP.getFreeHeap();
@@ -536,7 +530,6 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED:
       wsConnected = true;
-      showToast("Connected");
       redraw();
       reportSupply(true);
       sendBeacons();
@@ -544,7 +537,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_DISCONNECTED:
       wsConnected = false;
       if (!g_haveTarget) break;
-      showToast("Reconnecting");
+      g_header.clear();
       redraw();
       break;
     case WStype_TEXT: {
@@ -562,12 +555,6 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       }
       if (strcmp(t, "led") == 0) { applyLed(doc); return; }
       if (strcmp(t, "sound") == 0) { applySound(doc); return; }
-      if (strcmp(t, "notify") == 0) {
-        bool q = (strcmp(doc["reason"] | "", "question") == 0);
-        showToast(q ? "Answer needed" : "New output");
-        drawHeader();
-        return;
-      }
 
       return;
     }
@@ -695,10 +682,6 @@ void loop() {
 
   handleKeyboard();
 
-  static bool toastWasShown = false;
-  bool toastShowing = (millis() < toastUntil) && toast.length();
-  if (toastWasShown && !toastShowing) drawHeader();
-  toastWasShown = toastShowing;
 
   static unsigned long battTick = 0;
   if (millis() - battTick > 15000) {

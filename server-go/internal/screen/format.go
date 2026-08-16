@@ -83,11 +83,12 @@ func SliceIntoCards(text string, cols, linesPerCard, maxCards int) [][]string {
 	}
 
 	cards := [][]string{}
-	for i := 0; i < len(wrapped); i += linesPerCard {
-		end := min(i+linesPerCard, len(wrapped))
+	page := max(1, linesPerCard)
+	for i := 0; i < len(wrapped); i += page {
+		end := min(i+page, len(wrapped))
 		cards = append(cards, wrapped[i:end])
 	}
-	if len(cards) > maxCards {
+	if maxCards > 0 && len(cards) > maxCards {
 		return cards[len(cards)-maxCards:]
 	}
 	return cards

@@ -85,6 +85,27 @@ func TestSliceIntoCardsSanitizes(t *testing.T) {
 	}
 }
 
+// A zero or negative page size arrives from the environment (LINES_PER_CARD=0)
+// and used to advance the cursor by nothing, appending cards until the process
+// died. Nothing on the device is worth hanging the terminal for.
+func TestSliceIntoCardsSurvivesZeroPageSize(t *testing.T) {
+	for _, per := range []int{0, -1} {
+		lines := []string{}
+		for _, card := range SliceIntoCards("a\nb\nc", 20, per, 40) {
+			lines = append(lines, card...)
+		}
+		if strings.Join(lines, "") != "abc" {
+			t.Fatalf("linesPerCard=%d lost lines: %v", per, lines)
+		}
+	}
+}
+
+func TestSliceIntoCardsSurvivesZeroMaxCards(t *testing.T) {
+	if cards := SliceIntoCards("a\nb\nc", 20, 1, 0); len(cards) != 3 {
+		t.Fatalf("maxCards=0 must not silently erase the screen, got %v", cards)
+	}
+}
+
 func itoaSmall(n int) string {
 	if n < 10 {
 		return string(rune('0' + n))

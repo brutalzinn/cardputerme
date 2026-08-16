@@ -74,7 +74,7 @@ type mirrorCache struct {
 type stateResult struct {
 	lines         []screen.Line
 	status        string
-	badge         string
+	header        []screen.Cell
 	size          int
 	sessionExists bool
 	awaiting      bool
@@ -93,6 +93,7 @@ type Server struct {
 	order    []string
 
 	size      int
+	wifi      bool
 	notify    bool
 	soundBase string
 	lastNoSig string
@@ -172,6 +173,7 @@ func New(cfg Config) *Server {
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		size:     baseSize,
+		wifi:     true,
 		notify:   startingNotify(cfg),
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
@@ -310,7 +312,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 		return stateResult{
 			lines:         itemLines(items, s.pick, rows, cols),
 			status:        itemStatus(items, s.pick),
-			badge:         battery.Label(s.gauge.Status()),
+			header:        s.headerCellsLocked(),
 			size:          s.size,
 			sessionExists: true,
 		}
@@ -397,7 +399,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: bar, badge: battery.Label(s.gauge.Status()), size: s.size, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: bar, header: s.headerCellsLocked(), size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;
@@ -405,7 +407,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 // so a keystroke echo never waits on a capture in flight.
 func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
-		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", badge: battery.Label(s.gauge.Status()), size: s.size}
+		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", header: s.headerCellsLocked(), size: s.size}
 	}
 	grid, status, title := splitScreen(pane, s.cfg.HidePrefixes)
 	// Detect a prompt over the SAME blank-trimmed content the device shows (the
@@ -428,14 +430,14 @@ func gridTail(grid []screen.Line, status string) string {
 }
 
 func displayMessage(st stateResult) string {
-	b, _ := json.Marshal(screen.BuildDisplayBadge(st.lines, st.status, st.badge, st.size))
+	b, _ := json.Marshal(screen.BuildDisplayHeader(st.lines, st.status, st.header, st.size))
 	return string(b)
 }
 
-func sig(st stateResult) string {
-	b, _ := json.Marshal(st.lines)
-	return string(b) + st.status + st.badge
-}
+// sig is the frame the device would draw. Deriving it from the message itself
+// means a new field can never be added without also being noticed as a change —
+// the battery badge was invisible for exactly that reason.
+func sig(st stateResult) string { return displayMessage(st) }
 
 func (s *Server) pushIfChanged(force bool) {
 	s.mu.Lock()
@@ -724,6 +726,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			Text    string   `json:"text"`
 			State   string   `json:"state"`
 			Usb     bool     `json:"usb"`
+			Wifi    *bool    `json:"wifi"`
 			Mv      int      `json:"mv"`
 			Heap    int      `json:"heap"`
 			HeapMin int      `json:"heapmin"`
@@ -739,6 +742,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		switch m.Type {
 		case "report":
 			log.Printf("[device] heap=%d minheap=%d", m.Heap, m.HeapMin)
+			s.applyWifi(m.Wifi)
 			s.handleReport(m.Usb, m.Mv, time.Now())
 		case "beacons":
 			s.handleBeacons(m.List)

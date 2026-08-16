@@ -40,22 +40,32 @@ func TestBuildDisplayEmpty(t *testing.T) {
 
 func TestDisplayJSONShape(t *testing.T) {
 	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", 3))
-	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"badge":"","status":{"text":"s","color":2047}}`
+	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"header":[],"status":{"text":"s","color":2047}}`
 	if string(b) != want {
 		t.Fatalf("json = %s", b)
 	}
 }
 
-// The badge is a short server-chosen string for the device header. It carries
-// the battery today; keeping it generic means what it shows can change without
-// a re-flash.
-func TestDisplayCarriesABadge(t *testing.T) {
-	msg := BuildDisplayBadge([]Line{{"hi", 0xFFFF}}, "s", "53%", 2)
-	if msg.Badge != "53%" {
-		t.Fatalf("badge = %q", msg.Badge)
+// The header is a list of coloured runs the device draws left to right. It
+// carries WiFi, link state and battery today; because the server composes it,
+// what it says changes with a restart and never with a re-flash (#45).
+func TestDisplayCarriesAComposedHeader(t *testing.T) {
+	header := []Cell{{Text: "WiFi", Color: Colors.Status}, {Text: "  53%", Color: Colors.Dim}}
+	msg := BuildDisplayHeader([]Line{{"hi", 0xFFFF}}, "s", header, 2)
+	if len(msg.Header) != 2 || msg.Header[1].Text != "  53%" {
+		t.Fatalf("header = %+v", msg.Header)
 	}
 	b, _ := json.Marshal(msg)
-	if !strings.Contains(string(b), `"badge":"53%"`) {
+	if !strings.Contains(string(b), `"header":[{"text":"WiFi","color":2047},{"text":"  53%","color":33808}]`) {
+		t.Fatalf("json = %s", b)
+	}
+}
+
+// A nil header must serialize as an empty list, never null: the device iterates
+// it, and a renderer that has to special-case null is a renderer that decides.
+func TestDisplayHeaderIsNeverNull(t *testing.T) {
+	b, _ := json.Marshal(BuildDisplayHeader(nil, "s", nil, 2))
+	if !strings.Contains(string(b), `"header":[]`) {
 		t.Fatalf("json = %s", b)
 	}
 }
