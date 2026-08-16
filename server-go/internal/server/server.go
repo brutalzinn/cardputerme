@@ -33,6 +33,7 @@ const (
 	portStart           = 8001
 	portTries           = 255
 	repeatMaxHold       = 10 * time.Second
+	maxFramedRows       = 4
 	defaultPushDebounce = 15 * time.Millisecond
 )
 
@@ -164,6 +165,27 @@ func gridLines(rows []string) []screen.Line {
 	return out
 }
 
+// framedRows marks rows enclosed by a nearby pair of rule rows. Terminal UIs
+// draw their input widget in such a box, and the server renders its own input
+// line, so mirroring the widget only costs rows on a six-row screen. The gap
+// bound keeps an unpaired rule from swallowing the transcript behind it.
+func framedRows(rows []string) map[int]bool {
+	hidden := map[int]bool{}
+	prev := -1
+	for i, raw := range rows {
+		if _, isRule := screen.RuleTitle(raw); !isRule {
+			continue
+		}
+		if prev >= 0 && i-prev <= maxFramedRows+1 {
+			for j := prev + 1; j < i; j++ {
+				hidden[j] = true
+			}
+		}
+		prev = i
+	}
+	return hidden
+}
+
 func splitScreen(pane string) ([]screen.Line, string, string) {
 	rows := strings.Split(pane, "\n")
 	last := -1
@@ -185,7 +207,11 @@ func splitScreen(pane string) ([]screen.Line, string, string) {
 	}
 	kept := []string{}
 	title := ""
-	for _, raw := range rows[:last] {
+	hidden := framedRows(rows[:last])
+	for i, raw := range rows[:last] {
+		if hidden[i] {
+			continue
+		}
 		label, isRule := screen.RuleTitle(raw)
 		if isRule {
 			if label != "" {

@@ -69,3 +69,58 @@ func TestTheStatusStillNamesTheExposure(t *testing.T) {
 		t.Fatalf("got %q", st.status)
 	}
 }
+
+const framedInput = "real output line\n" +
+	"──────────────── my-session ──\n" +
+	"❯ Press up to edit queued messages\n" +
+	"──────────────────────────────\n" +
+	"  esc to interrupt\n"
+
+func TestTheInputWidgetIsNotMirrored(t *testing.T) {
+	grid, _, _ := splitScreen(framedInput)
+	for _, l := range grid {
+		if strings.Contains(l.Text, "Press up to edit") {
+			t.Fatalf("the app's own input box is chrome; the server renders its own input line: %q", l.Text)
+		}
+	}
+}
+
+func TestOutputAboveTheFrameSurvives(t *testing.T) {
+	grid, _, _ := splitScreen(framedInput)
+	found := false
+	for _, l := range grid {
+		if strings.Contains(l.Text, "real output line") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("only the framed widget is dropped, never the transcript")
+	}
+}
+
+func TestALoneRuleDoesNotSwallowTheTranscript(t *testing.T) {
+	pane := "──────────────────────────────\n" +
+		"keep me\nand me\nand me too\nand also me\nand still me\n" +
+		"  esc to interrupt\n"
+	grid, _, _ := splitScreen(pane)
+	kept := 0
+	for _, l := range grid {
+		if strings.HasPrefix(l.Text, "keep me") || strings.HasPrefix(l.Text, "and") {
+			kept++
+		}
+	}
+	if kept != 5 {
+		t.Fatalf("an unpaired rule must not hide everything after it, kept %d/5", kept)
+	}
+}
+
+func TestAWideGapBetweenRulesIsContent(t *testing.T) {
+	pane := "──────────────────────────────\n" +
+		"one\ntwo\nthree\nfour\nfive\nsix\n" +
+		"──────────────────────────────\n" +
+		"  esc to interrupt\n"
+	grid, _, _ := splitScreen(pane)
+	if len(grid) < 6 {
+		t.Fatalf("six rows between rules is a section, not an input box, got %d", len(grid))
+	}
+}
