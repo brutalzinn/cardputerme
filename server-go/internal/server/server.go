@@ -295,31 +295,16 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 		}
 	}
 	cols, rows := s.cols(), s.rows()
-	maxRow := max(0, len(grid)-rows)
-	maxCol := max(0, maxLen-cols)
-	selRow := -1
-	if awaiting {
-		selRow = findSelectorRow(grid)
-	}
-	if selRow >= 0 && selRow != s.sess.view.SelRow {
-		s.sess.view.Row = screen.AnchorRow(selRow, rows)
-		s.sess.view.Follow = false
-	}
-	s.sess.view.SelRow = selRow
-	if selRow < 0 && s.sess.view.Follow {
-		s.sess.view.Row = maxRow
-	}
-	s.sess.view.Row = clamp(s.sess.view.Row, 0, maxRow)
-	s.sess.view.Col = clamp(s.sess.view.Col, 0, maxCol)
-	if selRow < 0 && s.sess.view.Row >= maxRow {
-		s.sess.view.Follow = true
-	}
-	lines := screen.WindowLines(grid, s.sess.view, rows, cols)
 
+	// Build the trailing lines FIRST and reserve room for them. Filling the
+	// grid to `rows` and appending afterwards pushed the input line onto a page
+	// the user never sees — visible as "I can type but cannot read it" once
+	// zoomed in, where there is no slack.
+	tail := []screen.Line{}
 	add := func(text string, color uint16) {
 		for _, line := range strings.Split(text, "\n") {
 			for _, piece := range screen.WrapLine(line, cols) {
-				lines = append(lines, screen.Line{Text: piece, Color: color})
+				tail = append(tail, screen.Line{Text: piece, Color: color})
 			}
 		}
 	}
@@ -333,16 +318,43 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 		composed := screen.WrapLine("> "+strings.ReplaceAll(s.sess.input, "\n", " | "), cols)
 		from := max(0, len(composed)-2)
 		for _, piece := range composed[from:] {
-			lines = append(lines, screen.Line{Text: piece, Color: screen.Colors.Prompt})
+			tail = append(tail, screen.Line{Text: piece, Color: screen.Colors.Prompt})
 		}
 		if g := input.Suggest(s.sess.input, s.sess.history); g != "" {
 			ghost := []rune(g)
 			if len(ghost) > cols {
 				ghost = ghost[:cols]
 			}
-			lines = append(lines, screen.Line{Text: string(ghost), Color: screen.Colors.Dim})
+			tail = append(tail, screen.Line{Text: string(ghost), Color: screen.Colors.Dim})
 		}
 	}
+	if len(tail) > rows {
+		tail = tail[len(tail)-rows:]
+	}
+	gridRows := max(1, rows-len(tail))
+
+	maxRow := max(0, len(grid)-gridRows)
+	maxCol := max(0, maxLen-cols)
+	selRow := -1
+	if awaiting {
+		selRow = findSelectorRow(grid)
+	}
+	if selRow >= 0 && selRow != s.sess.view.SelRow {
+		s.sess.view.Row = screen.AnchorRow(selRow, gridRows)
+		s.sess.view.Follow = false
+	}
+	s.sess.view.SelRow = selRow
+	if selRow < 0 && s.sess.view.Follow {
+		s.sess.view.Row = maxRow
+	}
+	s.sess.view.Row = clamp(s.sess.view.Row, 0, maxRow)
+	s.sess.view.Col = clamp(s.sess.view.Col, 0, maxCol)
+	if selRow < 0 && s.sess.view.Row >= maxRow {
+		s.sess.view.Follow = true
+	}
+	lines := screen.WindowLines(grid, s.sess.view, gridRows, cols)
+	lines = append(lines, tail...)
+
 	hint := status
 	if awaiting {
 		hint = "PROMPT: press a number"
