@@ -55,7 +55,7 @@ func TestGridLines(t *testing.T) {
 }
 
 func TestSplitScreen(t *testing.T) {
-	grid, status := splitScreen("line one\nline two\n\n")
+	grid, status, _ := splitScreen("line one\nline two\n\n")
 	if status != "line two" {
 		t.Fatalf("status %q", status)
 	}
@@ -65,14 +65,14 @@ func TestSplitScreen(t *testing.T) {
 }
 
 func TestSplitScreenPrefersInterruptRow(t *testing.T) {
-	_, status := splitScreen("building the thing\n✳ Baking… (esc to interrupt)\n$ ")
+	_, status, _ := splitScreen("building the thing\n✳ Baking… (esc to interrupt)\n$ ")
 	if status != "Baking... (esc to interrupt)" {
 		t.Fatalf("status %q", status)
 	}
 }
 
 func TestSplitScreenFallsBackToLastRow(t *testing.T) {
-	_, status := splitScreen("line one\nline two\n")
+	_, status, _ := splitScreen("line one\nline two\n")
 	if status != "line two" {
 		t.Fatalf("status %q", status)
 	}
@@ -84,7 +84,7 @@ func TestComposeMirrorFollowsBottom(t *testing.T) {
 	for i := range 10 {
 		grid = append(grid, screen.Line{Text: "l" + string(rune('0'+i)), Color: screen.Colors.Text})
 	}
-	st := s.composeMirror(grid, "status", false)
+	st := s.composeMirror(grid, "status", "", false)
 	if len(st.lines) != viewRows {
 		t.Fatalf("want %d lines got %d", viewRows, len(st.lines))
 	}
@@ -99,7 +99,7 @@ func TestComposeMirrorFollowsBottom(t *testing.T) {
 func TestComposeMirrorShowsInputBuffer(t *testing.T) {
 	s := testServer()
 	s.input = "git status"
-	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", false)
+	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", "", false)
 	last := st.lines[len(st.lines)-1]
 	if last.Text != "> git status" || last.Color != screen.Colors.Prompt {
 		t.Fatalf("input line %+v", last)
@@ -146,7 +146,7 @@ func TestZoomInOutResetClamped(t *testing.T) {
 func TestComposeMirrorCarriesSize(t *testing.T) {
 	s := testServer()
 	s.size = 3
-	st := s.composeMirror([]screen.Line{{Text: "x", Color: screen.Colors.Text}}, "", false)
+	st := s.composeMirror([]screen.Line{{Text: "x", Color: screen.Colors.Text}}, "", "", false)
 	if st.size != 3 {
 		t.Fatalf("size in stateResult got %d", st.size)
 	}
@@ -156,7 +156,7 @@ func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
 	s := testServer()
 	s.input = "git c"
 	s.history = []string{"git commit"}
-	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", false)
+	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", "", false)
 	last := st.lines[len(st.lines)-1]
 	if last.Text != "git commit" || last.Color != screen.Colors.Dim {
 		t.Fatalf("ghost line %+v", last)

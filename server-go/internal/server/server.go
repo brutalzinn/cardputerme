@@ -57,6 +57,7 @@ type Config struct {
 type mirrorCache struct {
 	grid     []screen.Line
 	status   string
+	title    string
 	awaiting bool
 }
 
@@ -163,7 +164,7 @@ func gridLines(rows []string) []screen.Line {
 	return out
 }
 
-func splitScreen(pane string) ([]screen.Line, string) {
+func splitScreen(pane string) ([]screen.Line, string, string) {
 	rows := strings.Split(pane, "\n")
 	last := -1
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -173,7 +174,7 @@ func splitScreen(pane string) ([]screen.Line, string) {
 		}
 	}
 	if last < 0 {
-		return []screen.Line{}, ""
+		return []screen.Line{}, "", ""
 	}
 	status := strings.TrimSpace(screen.ToAscii(screen.StripAnsi(rows[last])))
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -182,7 +183,19 @@ func splitScreen(pane string) ([]screen.Line, string) {
 			break
 		}
 	}
-	return gridLines(rows[:last]), status
+	kept := []string{}
+	title := ""
+	for _, raw := range rows[:last] {
+		label, isRule := screen.RuleTitle(raw)
+		if isRule {
+			if label != "" {
+				title = label
+			}
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	return gridLines(kept), status, title
 }
 
 func findSelectorRow(grid []screen.Line) int {
@@ -208,7 +221,7 @@ func (s *Server) screenLines(text string) []screen.Line {
 	return out
 }
 
-func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool) stateResult {
+func (s *Server) composeMirror(grid []screen.Line, status, title string, awaiting bool) stateResult {
 	maxLen := 0
 	for _, l := range grid {
 		if rl := len([]rune(l.Text)); rl > maxLen {
@@ -256,6 +269,9 @@ func (s *Server) composeMirror(grid []screen.Line, status string, awaiting bool)
 		hint = "PROMPT: press a number"
 	}
 	bar := fmt.Sprintf("%s  r%d/%d c%d z%d", hint, s.view.Row, maxRow, s.view.Col, s.size)
+	if title != "" {
+		bar = title + "  " + bar
+	}
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
@@ -269,13 +285,13 @@ func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
 		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", size: s.size}
 	}
-	grid, status := splitScreen(pane)
+	grid, status, title := splitScreen(pane)
 	// Detect a prompt over the SAME blank-trimmed content the device shows (the
 	// grid + status row), not the raw tail — a menu with blank lines below it
 	// would otherwise fall outside the last-N raw rows and be missed.
 	awaiting := detectPromptAwaiting(gridTail(grid, status))
-	s.cache = &mirrorCache{grid: grid, status: status, awaiting: awaiting}
-	return s.composeMirror(grid, status, awaiting)
+	s.cache = &mirrorCache{grid: grid, status: status, title: title, awaiting: awaiting}
+	return s.composeMirror(grid, status, title, awaiting)
 }
 
 func gridTail(grid []screen.Line, status string) string {
@@ -381,7 +397,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	}
 	var echo string
 	if s.cache != nil {
-		st := s.composeMirror(s.cache.grid, s.cache.status, s.cache.awaiting)
+		st := s.composeMirror(s.cache.grid, s.cache.status, s.cache.title, s.cache.awaiting)
 		if sg := sig(st); sg != s.lastSig {
 			s.lastSig = sg
 			echo = displayMessage(st)
