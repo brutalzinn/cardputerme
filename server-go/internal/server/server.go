@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"cardputerme/internal/commands"
 	"cardputerme/internal/discovery"
 	"cardputerme/internal/input"
 	"cardputerme/internal/power"
@@ -82,7 +83,7 @@ type Server struct {
 	mu           sync.Mutex
 	input        string
 	cmd          string
-	notice       string
+	reply        string
 	hist         int
 	history      []string
 	view         screen.View
@@ -279,10 +280,18 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	}
 	lines := screen.WindowLines(grid, s.view, rows, cols)
 
-	if s.cmd != "" {
-		for _, piece := range screen.WrapLine(s.cmd, cols) {
-			lines = append(lines, screen.Line{Text: piece, Color: screen.Colors.Prompt})
+	add := func(text string, color uint16) {
+		for _, line := range strings.Split(text, "\n") {
+			for _, piece := range screen.WrapLine(line, cols) {
+				lines = append(lines, screen.Line{Text: piece, Color: color})
+			}
 		}
+	}
+	if s.reply != "" {
+		add(s.reply, screen.Colors.Status)
+	}
+	if s.cmd != "" {
+		add(s.cmd, screen.Colors.Prompt)
 	}
 	if len(s.input) > 0 {
 		composed := screen.WrapLine("> "+strings.ReplaceAll(s.input, "\n", " | "), cols)
@@ -303,7 +312,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 		hint = "PROMPT: press a number"
 	}
 	segs := []string{"[" + s.cfg.Name + "]"}
-	for _, seg := range []string{s.notice, title, hint} {
+	for _, seg := range []string{title, hint} {
 		if seg != "" {
 			segs = append(segs, seg)
 		}
@@ -406,7 +415,7 @@ func (s *Server) applyKey(key string) input.Action {
 func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
-	s.notice = ""
+	s.reply = ""
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
 	s.input = res.State.Input
 	s.cmd = res.State.Cmd
@@ -435,7 +444,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	case "pressKey":
 		s.view.Follow = true
 	case "command":
-		s.notice = runCommand(s, a.Text)
+		s.reply = commands.Run(commands.Ctx{Name: s.cfg.Name}, a.Text)
 	}
 	var echo string
 	if s.cache != nil {

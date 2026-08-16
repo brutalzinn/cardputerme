@@ -48,7 +48,7 @@ func TestEscCancelsTheCommand(t *testing.T) {
 
 func TestEnterRunsTheCommand(t *testing.T) {
 	r := InterpretKey(State{Cmd: ";ping", Hist: -1}, "enter", KeyCtx{})
-	if r.Action.Kind != "command" || r.Action.Text != ";ping" {
+	if r.Action.Kind != "command" || r.Action.Text != "ping" {
 		t.Fatalf("got %+v", r.Action)
 	}
 	if r.State.Cmd != "" {

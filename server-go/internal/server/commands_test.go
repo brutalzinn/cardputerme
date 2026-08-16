@@ -5,53 +5,6 @@ import (
 	"testing"
 )
 
-func TestPingAnswersPong(t *testing.T) {
-	if got := runCommand(testServer(), ";ping"); got != "Pong!" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestAnUnknownVerbSaysSo(t *testing.T) {
-	got := runCommand(testServer(), ";nope")
-	if !strings.Contains(got, "nope") {
-		t.Fatalf("the reply must name the verb the user typed, got %q", got)
-	}
-}
-
-func TestArgumentsReachTheCommand(t *testing.T) {
-	seen := ""
-	commands["echo"] = func(s *Server, args string) string {
-		seen = args
-		return args
-	}
-	defer delete(commands, "echo")
-	runCommand(testServer(), ";echo hello world")
-	if seen != "hello world" {
-		t.Fatalf("got %q", seen)
-	}
-}
-
-func TestAVerbWithNoArgumentsGetsAnEmptyString(t *testing.T) {
-	seen := "unset"
-	commands["bare"] = func(s *Server, args string) string {
-		seen = args
-		return ""
-	}
-	defer delete(commands, "bare")
-	runCommand(testServer(), ";bare")
-	if seen != "" {
-		t.Fatalf("got %q", seen)
-	}
-}
-
-func TestAddingACommandIsOneMapEntry(t *testing.T) {
-	commands["pong"] = func(s *Server, args string) string { return "Ping!" }
-	defer delete(commands, "pong")
-	if got := runCommand(testServer(), ";pong"); got != "Ping!" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestTypingPingEndToEndShowsPong(t *testing.T) {
 	s := testServer()
 	for _, k := range []string{";", "p", "i", "n", "g", "enter"} {
@@ -59,8 +12,8 @@ func TestTypingPingEndToEndShowsPong(t *testing.T) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.notice != "Pong!" {
-		t.Fatalf("got %q", s.notice)
+	if s.reply != "Pong!" {
+		t.Fatalf("got %q", s.reply)
 	}
 	if s.input != "" {
 		t.Fatalf("a command must never land in the terminal buffer, got %q", s.input)
@@ -83,20 +36,30 @@ func TestTheCommandLineIsVisibleWhileTyping(t *testing.T) {
 	}
 }
 
-func TestTheReplyReachesTheStatusBar(t *testing.T) {
+func TestTheReplyIsShownLikeOutput(t *testing.T) {
 	s := testServer()
 	for _, k := range []string{";", "p", "i", "n", "g", "enter"} {
 		s.applyKey(k)
 	}
 	st := s.composeMirror(nil, "", "", false)
-	if !strings.Contains(st.status, "Pong!") {
-		t.Fatalf("got %q", st.status)
+	found := false
+	for _, l := range st.lines {
+		if strings.Contains(l.Text, "Pong!") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a command reply is a response, so it belongs on screen with the output")
 	}
 }
 
-func TestAnEmptyCommandLineSaysNothing(t *testing.T) {
-	if got := runCommand(testServer(), ";"); got != "" {
-		t.Fatalf("got %q", got)
+func TestTheReplyStaysOutOfTheStatusBar(t *testing.T) {
+	s := testServer()
+	for _, k := range []string{";", "p", "i", "n", "g", "enter"} {
+		s.applyKey(k)
+	}
+	if st := s.composeMirror(nil, "", "", false); strings.Contains(st.status, "Pong!") {
+		t.Fatalf("the bar is for state, not replies, got %q", st.status)
 	}
 }
 
@@ -117,7 +80,20 @@ func TestTheNoticeClearsOnTheNextKey(t *testing.T) {
 	s.applyKey("x")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.notice != "" {
-		t.Fatalf("a reply must not pin itself to the status bar, got %q", s.notice)
+	if s.reply != "" {
+		t.Fatalf("a reply must not pin itself to the status bar, got %q", s.reply)
+	}
+}
+
+func TestHelpRendersOneCommandPerRow(t *testing.T) {
+	s := testServer()
+	for _, k := range []string{";", "h", "e", "l", "p", "enter"} {
+		s.applyKey(k)
+	}
+	st := s.composeMirror(nil, "", "", false)
+	for _, l := range st.lines {
+		if strings.Count(l.Text, ";") > 1 {
+			t.Fatalf("two commands crammed into one row: %q", l.Text)
+		}
 	}
 }

@@ -71,7 +71,7 @@ func commandKey(state State, key string) Result {
 		return typing("")
 	}
 	if key == "enter" {
-		return Result{State{Input: state.Input, Hist: state.Hist}, Action{Kind: "command", Text: state.Cmd}}
+		return Result{State{Input: state.Input, Hist: state.Hist}, Action{Kind: "command", Text: strings.TrimPrefix(state.Cmd, CommandPrefix)}}
 	}
 	if key == "backspace" {
 		return typing(state.Cmd[:len(state.Cmd)-1])
