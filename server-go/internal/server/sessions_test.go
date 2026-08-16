@@ -190,7 +190,10 @@ func TestHealthWithNoSessionsDoesNotPanic(t *testing.T) {
 func TestHealthReportsTheMachineAndItsSessions(t *testing.T) {
 	s, srv := regServer(t)
 	s.register("gitme", "gitme", "/tmp")
-	res, _ := http.Get(srv.URL + "/health")
+	res, err := http.Get(srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer res.Body.Close()
 	var body struct {
 		Machine  string   `json:"machine"`
