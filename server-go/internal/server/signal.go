@@ -136,6 +136,7 @@ func (s *Server) dismissAlert() {
 		s.hub.broadcast(soundStopMessage())
 	}
 	s.setLed(ledOff)
+	s.clearAlert()
 }
 
 func (s *Server) signalAttention() {

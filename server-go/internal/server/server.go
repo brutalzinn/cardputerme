@@ -94,6 +94,7 @@ type Server struct {
 
 	size      int
 	wifi      bool
+	alert     string
 	notify    bool
 	soundBase string
 	lastNoSig string

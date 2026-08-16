@@ -37,6 +37,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ws", s.wsHandler)
 	mux.HandleFunc("/sessions", s.sessionsHandler)
+	mux.HandleFunc("/notify", s.notifyHandler)
 	mux.Handle(soundPrefix, s.soundHandler())
 }
 

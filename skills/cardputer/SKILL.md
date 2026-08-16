@@ -1,6 +1,6 @@
 ---
 name: cardputer
-description: Link the CURRENT Claude Code session to an M5Cardputer over Wi-Fi so the user can watch and drive Claude from the pocket device. Registers this terminal as a session on the machine's cardputerme server (small HTTP API), which the device discovers over a UDP beacon and drives over WebSocket. Use when the user asks to "expose to cardputer", "link this session", "send this session to the cardputer", or drive Claude from the device. Global; works from any Claude Code account.
+description: Link the CURRENT Claude Code session to an M5Cardputer over Wi-Fi so the user can watch and drive Claude from the pocket device, and send the user a notification on that device. Registers this terminal as a session on the machine's cardputerme server (small HTTP API), which the device discovers over a UDP beacon and drives over WebSocket. Use when the user asks to "expose to cardputer", "link this session", "send this session to the cardputer", drive Claude from the device, or to notify/alert/ping the user on the Cardputer when a long task finishes or is stuck. Global; works from any Claude Code account.
 ---
 
 # cardputer — link this session to the device
@@ -21,8 +21,34 @@ The server publishes its port in `~/.cardputerme/server.port` (a bare number, so
 | `GET /sessions` | `{current, sessions[]}` — what this machine exposes. |
 | `POST /sessions` | Link a terminal: `{"name":…,"session":…,"cwd":…}`. Idempotent by name. |
 | `DELETE /sessions?name=…` | Unlink one session. |
+| `POST /notify` | **Get the user's attention on the device**: `{"session":…,"text":…}`. See below. |
 
-Prefer the CLI (step 3) — it performs exactly this registration. Use the API directly only to **inspect** state (step 4) or when the user asks for something the CLI does not cover, such as unlinking.
+Prefer the CLI (step 3) — it performs exactly this registration. Use the API directly only to **inspect** state (step 4), to **notify** (below), or when the user asks for something the CLI does not cover, such as unlinking.
+
+## Notifying the user on the device
+
+The point of the Cardputer is that the user does **not** have to watch the screen. `POST /notify` is how you reach them: it plays a sound, lights the LED, wakes the screen, and puts your text in the device header until they press a key.
+
+```
+port=$(tr -dc '0-9' <~/.cardputerme/server.port)
+curl -sS -X POST "http://127.0.0.1:$port/notify" \
+  -H 'Content-Type: application/json' \
+  -d '{"session":"'"$(basename "$PWD")"'","text":"tests still running after 5m"}'
+```
+
+The reply is `{"delivered":true|false,"notify":true|false}`. **`delivered:false` is not an error** — it means the user ran `;notify 0` on the device and asked for silence. Report that plainly and do not retry or route around it.
+
+**When to notify — the bar is "the user would want to be interrupted":**
+
+- A long task finished and you need their input or approval.
+- You are **stuck**: blocked on something you cannot resolve, or a step has run far longer than expected.
+- A build, test run or deploy failed in a way that stops the work.
+
+**When NOT to:** routine progress, each step of a task, anything they will see the moment they look at the terminal, or more than once for the same event. A device that cries wolf gets ignored, and every alert costs the user's attention.
+
+Keep `text` short — the header shows about 26 characters before clipping. Say what happened, not what you did (`"tests failed: 3 red"` beats `"I have finished running the test suite"`). Set `session` to the project name so the user knows **which** terminal wants them; both fields are optional.
+
+Notifying does not require the session to be linked first, but it is far more useful when it is — otherwise the user gets an alert with nothing to switch to.
 
 ## Steps
 

@@ -68,11 +68,26 @@ func TestAbsentWifiFactLeavesTheHeaderAlone(t *testing.T) {
 	}
 }
 
-func TestHeaderOmitsBatteryUntilKnown(t *testing.T) {
+// The battery is ALWAYS on screen (user, 2026-08-16) — a header that shows it
+// only sometimes is one you cannot trust at a glance.
+func TestBatteryIsAlwaysInTheHeader(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
 	s.setWifi(true)
-	if got := headerText(s.headerCells()); strings.Contains(got, "%") {
-		t.Fatalf("no reading yet means no percentage, got %q", got)
+	if got := headerText(s.headerCells()); !strings.Contains(got, unknownBattery) {
+		t.Fatalf("with no reading yet the slot must still be there, got %q", got)
+	}
+	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
+	if got := headerText(s.headerCells()); !strings.Contains(got, "50%") {
+		t.Fatalf("header = %q", got)
+	}
+}
+
+// Always showing it must never mean inventing a number: an unread battery is
+// not a flat one, and 0% would be a lie the user acts on.
+func TestUnknownBatteryIsNotAFakeNumber(t *testing.T) {
+	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
+	if got := headerText(s.headerCells()); strings.Contains(got, "0%") {
+		t.Fatalf("header = %q", got)
 	}
 }
 
