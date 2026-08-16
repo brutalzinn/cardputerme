@@ -25,7 +25,7 @@ func TestWireEndToEnd(t *testing.T) {
 	}
 	defer exec.Command("tmux", "kill-session", "-t", sess).Run()
 
-	s := New(Config{Name: sess, WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true})
+	s := withSession(New(Config{Name: sess, WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true}))
 	srv := httptest.NewServer(http.HandlerFunc(s.wsHandler))
 	defer srv.Close()
 
@@ -88,7 +88,7 @@ func TestAwaitingSyncsOnPrompt(t *testing.T) {
 	exec.Command("tmux", "send-keys", "-t", sess, "Enter").Run()
 	time.Sleep(500 * time.Millisecond)
 
-	s := New(Config{Name: sess, WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true})
+	s := withSession(New(Config{Name: sess, WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true}))
 	s.pushIfChanged(true)
 
 	s.mu.Lock()

@@ -7,7 +7,7 @@ import (
 )
 
 func testServer() *Server {
-	return New(Config{Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true})
+	return withSession(New(Config{Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true}))
 }
 
 func TestDetectPromptAwaiting(t *testing.T) {
@@ -161,4 +161,11 @@ func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
 	if last.Text != "git commit" || last.Color != screen.Colors.Dim {
 		t.Fatalf("ghost line %+v", last)
 	}
+}
+
+// withSession registers a terminal for tests that exercise session state. The
+// machine server owns none until one registers.
+func withSession(s *Server) *Server {
+	s.register(s.cfg.Name, sessionTarget(s.cfg), "")
+	return s
 }

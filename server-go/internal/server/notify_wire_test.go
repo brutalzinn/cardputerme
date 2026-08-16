@@ -50,7 +50,7 @@ func dialFake(t *testing.T, sess string, cfg Config) *fakeDevice {
 	t.Cleanup(func() { exec.Command("tmux", "kill-session", "-t", sess).Run() })
 
 	cfg.Name = sess
-	s := New(cfg)
+	s := withSession(New(cfg))
 	srv := httptest.NewServer(http.HandlerFunc(s.wsHandler))
 	t.Cleanup(srv.Close)
 

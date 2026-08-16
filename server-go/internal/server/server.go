@@ -84,15 +84,21 @@ type Server struct {
 	hub      *hub
 	upgrader websocket.Upgrader
 
-	mu   sync.Mutex
-	sess *session
+	mu       sync.Mutex
+	sess     *session
+	sessions map[string]*session
+	order    []string
 
 	size      int
 	soundBase string
+	lastNoSig string
 	lastLed   string
 	beacons   []beacon
 	picking   bool
 	pick      int
+
+	pushMu    sync.Mutex
+	pushTimer *time.Timer
 
 	power         *power.Tracker
 	powerDeadline deadline
@@ -132,7 +138,7 @@ func sessionTarget(cfg Config) string {
 func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
-		sess:     newSession(cfg.Name, terminal.CreateBackend(sessionTarget(cfg), cfg.ScrollbackLines)),
+		sessions: map[string]*session{},
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		size:     baseSize,
@@ -388,6 +394,10 @@ func sig(st stateResult) string {
 }
 
 func (s *Server) pushIfChanged(force bool) {
+	if s.currentName() == "" {
+		s.pushNoSessions(force)
+		return
+	}
 	pane, ok := s.sess.backend.Capture() // read-only subprocess — kept OUT of the lock
 	s.mu.Lock()
 	st := s.stateFrom(pane, ok)
@@ -448,9 +458,35 @@ func (s *Server) applyKey(key string) input.Action {
 	return s.applyKeyTimes(key, 1)
 }
 
+// applyKeyNoSession keeps the device usable on a machine with nothing
+// registered: the picker must still open, or the user is stranded with no way
+// to reach another machine.
+func (s *Server) applyKeyNoSession(key string) input.Action {
+	s.mu.Lock()
+	res := input.InterpretKey(
+		input.State{Picking: s.picking, Pick: s.pick},
+		key,
+		input.KeyCtx{Beacons: len(s.beacons)},
+	)
+	s.picking = res.State.Picking
+	s.pick = res.State.Pick
+	connect := s.resolveConnect(res.Action)
+	s.mu.Unlock()
+
+	if connect != "" {
+		log.Printf("[picker] %s", connect)
+		s.hub.broadcast(connect)
+	}
+	s.pushIfChanged(true)
+	return res.Action
+}
+
 func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.setLed(ledOff)
+	if s.currentName() == "" {
+		return s.applyKeyNoSession(key)
+	}
 	s.mu.Lock()
 	s.sess.reply = ""
 	res := input.InterpretKey(
@@ -670,15 +706,15 @@ func (s *Server) pushAfter() time.Duration {
 }
 
 func (s *Server) schedulePush() {
-	s.sess.pushMu.Lock()
-	defer s.sess.pushMu.Unlock()
-	if s.sess.pushTimer != nil {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+	if s.pushTimer != nil {
 		return
 	}
-	s.sess.pushTimer = time.AfterFunc(s.pushAfter(), func() {
-		s.sess.pushMu.Lock()
-		s.sess.pushTimer = nil
-		s.sess.pushMu.Unlock()
+	s.pushTimer = time.AfterFunc(s.pushAfter(), func() {
+		s.pushMu.Lock()
+		s.pushTimer = nil
+		s.pushMu.Unlock()
 		s.pushIfChanged(false)
 	})
 }
@@ -749,7 +785,8 @@ func (s *Server) Run() error {
 		return fmt.Errorf("no free port between %d and %d", portStart, portStart+portTries-1)
 	}
 	target := sessionTarget(s.cfg)
-	created, ok := s.sess.backend.EnsureSession(s.cfg.SessionCwd)
+	sess := s.register(s.cfg.Name, target, s.cfg.SessionCwd)
+	created, ok := sess.backend.EnsureSession(s.cfg.SessionCwd)
 	if !ok {
 		return fmt.Errorf("could not attach to or create terminal '%s'", target)
 	}
@@ -758,9 +795,7 @@ func (s *Server) Run() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.healthHandler)
-	mux.HandleFunc("/ws", s.wsHandler)
-	mux.Handle(soundPrefix, s.soundHandler())
+	s.routes(mux)
 
 	log.Printf("cardputerme — exposing '%s' on http://0.0.0.0:%d  (ws://…/ws)", s.cfg.Name, port)
 	log.Printf("  screen : dim after %v, off after %v (0 = never)", s.cfg.DimAfter, s.cfg.OffAfter)
@@ -769,10 +804,7 @@ func (s *Server) Run() error {
 	s.armPowerTimer()
 	s.armIdleTimer()
 
-	stop := s.sess.backend.Subscribe(s.schedulePush, func() {
-		log.Printf("[expose] terminal '%s' is gone — shutting down", s.cfg.Name)
-		os.Exit(0)
-	})
+	stop := sess.backend.Subscribe(s.schedulePush, func() { s.terminalGone(sess.name) })
 	defer stop()
 
 	return http.ListenAndServe(":"+strconv.Itoa(port), mux)
