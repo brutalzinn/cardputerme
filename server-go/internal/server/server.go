@@ -126,6 +126,8 @@ type Server struct {
 	repeat         *repeat.Holder
 	repeatDeadline deadline
 
+	toneDeadline deadline
+
 	// onNotify lets a test observe which session raised the alert.
 	onNotify func(session string)
 }
@@ -475,7 +477,7 @@ func (s *Server) pushIfChanged(force bool) {
 		s.hub.broadcastFrame(msg)
 	}
 	if freshQuestion {
-		s.raiseAlert(s.currentName(), awaitingAlert)
+		s.raiseAlert(s.currentName(), awaitingAlert, attention)
 	}
 }
 

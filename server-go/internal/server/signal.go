@@ -110,12 +110,29 @@ func (s *Server) resendLed() {
 	s.hub.broadcast(msg)
 }
 
-func (s *Server) playNotifySound() {
-	if url := s.soundURL(s.cfg.NotifySound); url != "" {
-		s.hub.broadcast(soundMessage(url))
+// playLevel sends the level's sound. A multi-note burst is paced by re-arming a
+// deadline from inside its own callback — never a ticker, and `arm(0)` is the
+// cancel path a keypress needs.
+func (s *Server) playLevel(l level) {
+	if l.usesWav() {
+		if url := s.soundURL(s.cfg.NotifySound); url != "" {
+			s.hub.broadcast(soundMessage(url))
+			return
+		}
+	}
+	s.playNotes(l.tones())
+}
+
+func (s *Server) playNotes(notes []note) {
+	if len(notes) == 0 {
 		return
 	}
-	s.hub.broadcast(toneMessage(1200, 90))
+	s.hub.broadcast(toneMessage(notes[0].freq, notes[0].ms))
+	rest := notes[1:]
+	if len(rest) == 0 {
+		return
+	}
+	s.toneDeadline.arm(burstGap, func() { s.playNotes(rest) })
 }
 
 // signalAttention is the ONE place alerts leave the server, so `;notify 0`
@@ -131,18 +148,19 @@ func (s *Server) dismissAlert() {
 	if lit {
 		s.hub.broadcast(soundStopMessage())
 	}
+	s.toneDeadline.arm(0, nil)
 	s.setLed(ledOff)
 	// A keypress means "I am here", not "I have dealt with every project": it
 	// answers the session on screen and leaves the others waiting.
 	s.clearSession(s.currentName())
 }
 
-func (s *Server) signalAttention() {
+func (s *Server) signalAttention(l level) {
 	if !s.NotifyEnabled() {
 		return
 	}
-	s.setLed(ledAttention)
-	s.playNotifySound()
+	s.setLed(l.led())
+	s.playLevel(l)
 }
 
 func (s *Server) soundHandler() http.Handler {

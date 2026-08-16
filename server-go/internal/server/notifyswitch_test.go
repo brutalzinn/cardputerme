@@ -24,7 +24,7 @@ func TestNotifyCommandSilencesEveryChannel(t *testing.T) {
 
 	// with alerts off, an attention signal must emit nothing at all
 	before := s.lastLed
-	s.signalAttention()
+	s.signalAttention(attention)
 	if s.lastLed != before {
 		t.Fatal("`;notify 0` must silence the LED too, not just the beep")
 	}

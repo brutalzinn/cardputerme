@@ -45,6 +45,16 @@ The reply is `{"delivered":…,"queued":true,"waiting":N,"clients":N,"reason":"�
 
 `waiting` is how many alerts are still unanswered. If it is climbing, you are paging too often — stop.
 
+**Levels.** Add `"level"` to say how much attention you are asking for. Absent or unknown means `attention`, so you never have to set it.
+
+| level | use it for | on the device |
+|---|---|---|
+| `info` | done, nothing needed from them | blue LED, one quiet note |
+| `attention` (default) | finished and waiting on them | orange pulsing LED, the notification sound |
+| `urgent` | broken and stopping the work | red LED, a rising three-note burst |
+
+Use `urgent` sparingly. It is the one that will make someone put down a coffee; spend it on "the deploy is failing", not "the tests finished".
+
 **When to notify — the bar is "the user would want to be interrupted":**
 
 - A long task finished and you need their input or approval.

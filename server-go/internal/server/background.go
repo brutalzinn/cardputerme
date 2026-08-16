@@ -60,7 +60,7 @@ func (s *Server) checkSession(name string) {
 	if !fire {
 		return
 	}
-	s.raiseAlert(name, awaitingAlert)
+	s.raiseAlert(name, awaitingAlert, attention)
 	if s.onNotify != nil {
 		s.onNotify(name)
 	}

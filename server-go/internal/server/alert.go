@@ -29,6 +29,7 @@ const awaitingAlert = "waiting"
 type alertRequest struct {
 	Session string `json:"session"`
 	Text    string `json:"text"`
+	Level   string `json:"level"`
 }
 
 // alert is one unanswered request for the human.
@@ -45,7 +46,7 @@ type alert struct {
 // Queuing is unconditional; only the NOISE is switched. `;notify 0` used to
 // discard the alert outright, so silencing the device also destroyed the record
 // of who wanted you — silence must mean "make no noise", never "throw away".
-func (s *Server) raiseAlert(session, text string) bool {
+func (s *Server) raiseAlert(session, text string, l level) bool {
 	line := alertLine(session, text)
 	s.queueAlert(session, clip(line, alertWidth))
 	if !s.NotifyEnabled() {
@@ -57,7 +58,7 @@ func (s *Server) raiseAlert(session, text string) bool {
 	// Waking is part of the alert, not a nicety: the text is only readable on a
 	// lit screen, and the ADV cannot light its LED while the backlight is off.
 	s.applyPower(s.power.Wake(time.Now()))
-	s.signalAttention()
+	s.signalAttention(l)
 	s.schedulePush()
 	return true
 }
@@ -138,7 +139,7 @@ func (s *Server) notifyHandler(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	signalled := s.raiseAlert(strings.TrimSpace(req.Session), strings.TrimSpace(req.Text))
+	signalled := s.raiseAlert(strings.TrimSpace(req.Session), strings.TrimSpace(req.Text), levelOf(req.Level))
 	// Honest: a broadcast into an empty client map is silently discarded, so
 	// "the switch is on" was never the same fact as "a device got it". A pager
 	// that lies about delivery is worse than one that fails loudly.
