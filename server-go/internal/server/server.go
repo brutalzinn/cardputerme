@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"cardputerme/internal/battery"
 	"cardputerme/internal/commands"
 	"cardputerme/internal/discovery"
 	"cardputerme/internal/input"
@@ -98,6 +99,8 @@ type Server struct {
 	power         *power.Tracker
 	powerDeadline deadline
 
+	gauge *battery.Gauge
+
 	repeat         *repeat.Holder
 	repeatDeadline deadline
 }
@@ -107,6 +110,16 @@ const (
 	sizeMin  = 1
 	sizeMax  = 3
 )
+
+var batteryPolicy = battery.Policy{
+	MinMv:       3300,
+	MaxMv:       4100,
+	Window:      8,
+	Deadband:    3,
+	SettleAfter: 2 * time.Second,
+	RiseRate:    0.5,
+	RisePeriod:  30 * time.Second,
+}
 
 func sessionTarget(cfg Config) string {
 	if cfg.Session != "" {
@@ -126,6 +139,7 @@ func New(cfg Config) *Server {
 		size:     baseSize,
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
+		gauge:    battery.NewGauge(batteryPolicy),
 	}
 }
 
@@ -311,8 +325,10 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
+	pct, known := s.gauge.Percent()
+	bat := battery.Label(pct, known, s.gauge.Charging())
 	segs := []string{"[" + s.cfg.Name + "]"}
-	for _, seg := range []string{title, hint} {
+	for _, seg := range []string{title, hint, bat} {
 		if seg != "" {
 			segs = append(segs, seg)
 		}
@@ -397,6 +413,7 @@ func powerMessage(st power.State) string {
 
 func (s *Server) applyPower(st power.State, changed bool) {
 	if changed {
+		s.gauge.Disturb(time.Now())
 		s.hub.broadcast(powerMessage(st))
 	}
 	s.armPowerTimer()
@@ -476,9 +493,13 @@ func onExternalPower(usb bool, milliVolts, threshold int) bool {
 }
 
 func (s *Server) handleReport(usb bool, milliVolts int, now time.Time) {
-	external := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
-	log.Printf("[power] device reports usb=%v mv=%d (threshold %d) — external=%v", usb, milliVolts, s.cfg.UsbMilliVolts, external)
+	wired := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
+	s.gauge.Observe(battery.Reading{Millivolts: milliVolts, External: wired, At: now})
+	external := s.gauge.Charging()
+	pct, known := s.gauge.Percent()
+	log.Printf("[power] device reports usb=%v mv=%d (threshold %d) — external=%v battery=%q", usb, milliVolts, s.cfg.UsbMilliVolts, external, battery.Label(pct, known, external))
 	s.applyPower(s.power.SetExternalPower(now, external))
+	s.schedulePush()
 }
 
 func (s *Server) handleKeyEvent(key, state string, now time.Time) {
