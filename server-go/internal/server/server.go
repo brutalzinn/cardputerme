@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -448,7 +447,8 @@ func (s *Server) armIdleTimer() {
 	now := time.Now()
 	if s.idle.Expired(now) {
 		log.Printf("[expose] no device has connected to '%s' for %v — shutting down (IDLE_EXIT_H=0 disables this)", s.cfg.Name, s.cfg.IdleExit)
-		os.Exit(0)
+		s.shutdown()
+		return
 	}
 	s.idleDeadline.arm(s.idle.Until(now), s.armIdleTimer)
 }
@@ -468,14 +468,15 @@ func (s *Server) applyKey(key string) input.Action {
 // to reach another machine.
 func (s *Server) applyKeyNoSession(key string) input.Action {
 	s.mu.Lock()
+	items := s.itemsLocked()
 	res := input.InterpretKey(
 		input.State{Picking: s.picking, Pick: s.pick},
 		key,
-		input.KeyCtx{Beacons: len(s.itemsLocked())},
+		input.KeyCtx{Beacons: len(items)},
 	)
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
-	connect, switchTo := s.resolvePick(res.Action, s.itemsLocked())
+	connect, switchTo := s.resolvePick(res.Action, items)
 	s.mu.Unlock()
 
 	if connect != "" {
@@ -496,11 +497,12 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		return s.applyKeyNoSession(key)
 	}
 	s.mu.Lock()
+	items := s.itemsLocked()
 	s.sess.reply = ""
 	res := input.InterpretKey(
 		input.State{Input: s.sess.input, Hist: s.sess.hist, Cmd: s.sess.cmd, Picking: s.picking, Pick: s.pick},
 		key,
-		input.KeyCtx{Awaiting: s.sess.lastAwaiting, History: s.sess.history, Beacons: len(s.itemsLocked())},
+		input.KeyCtx{Awaiting: s.sess.lastAwaiting, History: s.sess.history, Beacons: len(items)},
 	)
 	s.sess.input = res.State.Input
 	s.sess.cmd = res.State.Cmd
@@ -508,7 +510,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
 	a := res.Action
-	connect, switchTo := s.resolvePick(a, s.itemsLocked())
+	connect, switchTo := s.resolvePick(a, items)
 	switch a.Kind {
 	case "pan":
 		for i := 0; i < times; i++ {

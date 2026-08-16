@@ -121,10 +121,6 @@ func sendKeyArgs(session, key string, times int) []string {
 	return append(args, "-l", key)
 }
 
-func (b *Backend) SendKey(key string) bool {
-	return b.SendKeyTimes(key, 1)
-}
-
 func (b *Backend) SendKeyTimes(key string, times int) bool {
 	code, _ := tmux(sendKeyArgs(b.session, key, times)...)
 	return code == 0

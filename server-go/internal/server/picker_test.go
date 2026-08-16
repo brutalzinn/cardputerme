@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func manyBeacons(n int) []beacon {
-	out := make([]beacon, n)
+func manyBeacons(n int) []pickerItem {
+	out := make([]pickerItem, n)
 	for i := range out {
-		out[i] = beacon{Name: string(rune('a' + i)), IP: "192.168.0.20", Port: 8001 + i}
+		out[i] = pickerItem{machine: beacon{Name: string(rune('a' + i)), IP: "192.168.0.20", Port: 8001 + i}}
 	}
 	return out
 }
@@ -36,7 +36,7 @@ func TestPickerStartKeepsTheSelectionVisible(t *testing.T) {
 }
 
 func TestPickerLinesNumbersTheVisibleWindow(t *testing.T) {
-	lines := pickerLines(manyBeacons(9), 8, 4, 20)
+	lines := itemLines(manyBeacons(9), 8, 4, 20)
 	if len(lines) != 4 {
 		t.Fatalf("want 4 rows, got %d", len(lines))
 	}
@@ -50,7 +50,7 @@ func TestPickerLinesNumbersTheVisibleWindow(t *testing.T) {
 }
 
 func TestPickerLinesMarksTheSelection(t *testing.T) {
-	lines := pickerLines(manyBeacons(3), 1, 4, 20)
+	lines := itemLines(manyBeacons(3), 1, 4, 20)
 	if !strings.Contains(lines[1].Text, ">") {
 		t.Fatalf("the selected row carries a cursor, got %q", lines[1].Text)
 	}
@@ -60,7 +60,7 @@ func TestPickerLinesMarksTheSelection(t *testing.T) {
 }
 
 func TestPickerLinesWithNoBeacons(t *testing.T) {
-	lines := pickerLines(nil, 0, 4, 20)
+	lines := itemLines(nil, 0, 4, 20)
 	if len(lines) == 0 {
 		t.Fatal("an empty list still tells the user what is happening")
 	}
@@ -70,8 +70,8 @@ func TestPickerLinesWithNoBeacons(t *testing.T) {
 }
 
 func TestPickerLinesTruncatesToWidth(t *testing.T) {
-	long := []beacon{{Name: "a-very-long-exposure-name-indeed", IP: "192.168.0.20", Port: 8001}}
-	for _, l := range pickerLines(long, 0, 4, 20) {
+	long := []pickerItem{{machine: beacon{Name: "a-very-long-exposure-name-indeed", IP: "192.168.0.20", Port: 8001}}}
+	for _, l := range itemLines(long, 0, 4, 20) {
 		if len([]rune(l.Text)) > 20 {
 			t.Fatalf("row exceeds the 20-column screen: %q", l.Text)
 		}
@@ -87,10 +87,10 @@ func TestConnectMessage(t *testing.T) {
 }
 
 func TestPickerStatusShowsPosition(t *testing.T) {
-	if got := pickerStatus(manyBeacons(9), 4); !strings.Contains(got, "5/9") {
+	if got := itemStatus(manyBeacons(9), 4); !strings.Contains(got, "5/9") {
 		t.Fatalf("status must show position in the full list, got %q", got)
 	}
-	if got := pickerStatus(nil, 0); strings.Contains(got, "/") {
+	if got := itemStatus(nil, 0); strings.Contains(got, "/") {
 		t.Fatalf("no position with an empty list, got %q", got)
 	}
 }

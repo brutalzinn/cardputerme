@@ -156,32 +156,3 @@ func clip(text string, cols int) string {
 	}
 	return string(r[:cols])
 }
-
-func pickerLines(bs []beacon, pick, rows, cols int) []screen.Line {
-	if len(bs) == 0 {
-		return []screen.Line{
-			{Text: clip("no terminals yet", cols), Color: screen.Colors.Dim},
-			{Text: clip("run cardputerme", cols), Color: screen.Colors.Dim},
-		}
-	}
-	start := pickerStart(pick, len(bs), rows)
-	out := []screen.Line{}
-	for i := start; i < len(bs) && i < start+rows; i++ {
-		mark := " "
-		color := screen.Colors.Text
-		if i == pick {
-			mark = ">"
-			color = screen.Colors.Prompt
-		}
-		row := mark + strconv.Itoa(i-start+1) + ". " + bs[i].Name
-		out = append(out, screen.Line{Text: clip(row, cols), Color: color})
-	}
-	return out
-}
-
-func pickerStatus(bs []beacon, pick int) string {
-	if len(bs) == 0 {
-		return "servers  listening"
-	}
-	return "servers  " + strconv.Itoa(pick+1) + "/" + strconv.Itoa(len(bs))
-}
