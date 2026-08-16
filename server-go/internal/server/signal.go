@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -64,6 +65,17 @@ func (s *Server) setLed(l led) {
 	s.mu.Unlock()
 	if same {
 		return
+	}
+	log.Printf("[led] %s", msg)
+	s.hub.broadcast(msg)
+}
+
+func (s *Server) resendLed() {
+	s.mu.Lock()
+	msg := s.lastLed
+	s.mu.Unlock()
+	if msg == "" {
+		msg = ledMessage(ledOff)
 	}
 	s.hub.broadcast(msg)
 }

@@ -415,9 +415,6 @@ func (s *Server) pushIfChanged(force bool) {
 		s.hub.broadcast(`{"type":"notify","reason":"question"}`)
 		s.signalAttention()
 	}
-	if !st.awaiting {
-		s.setLed(ledOff)
-	}
 }
 
 func powerMessage(st power.State) string {
@@ -453,6 +450,7 @@ func (s *Server) applyKey(key string) input.Action {
 
 func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
+	s.setLed(ledOff)
 	s.mu.Lock()
 	s.reply = ""
 	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
@@ -590,6 +588,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	// connect time would wrongly land in the input buffer.
 	s.pushIfChanged(true)
 	s.hub.broadcast(powerMessage(s.power.State()))
+	s.resendLed()
 
 	for {
 		_, data, err := c.ReadMessage()

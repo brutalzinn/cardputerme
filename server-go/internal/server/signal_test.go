@@ -135,3 +135,17 @@ func TestSoundHandlerWithNoDirConfigured(t *testing.T) {
 		t.Fatal("no sounds dir configured must not serve anything")
 	}
 }
+
+func TestLedStateIsResentSoAReconnectingDeviceIsNotLeftDark(t *testing.T) {
+	s := New(Config{Name: "sig", WrapCols: 20})
+	s.setLed(ledAttention)
+	first := s.lastLed
+	s.setLed(ledAttention)
+	if s.lastLed != first {
+		t.Fatal("repeating the same state must stay deduped")
+	}
+	s.resendLed()
+	if s.lastLed != first {
+		t.Fatal("resend must not disturb the tracked state")
+	}
+}
