@@ -278,10 +278,11 @@ func (s *Server) screenLines(text string) []screen.Line {
 func (s *Server) composeMirror(grid []screen.Line, status, title string, awaiting bool) stateResult {
 	if s.picking {
 		cols, rows := s.cols(), s.rows()
-		s.pick = clamp(s.pick, 0, max(0, len(s.beacons)-1))
+		items := s.itemsLocked()
+		s.pick = clamp(s.pick, 0, max(0, len(items)-1))
 		return stateResult{
-			lines:         pickerLines(s.beacons, s.pick, rows, cols),
-			status:        pickerStatus(s.beacons, s.pick),
+			lines:         itemLines(items, s.pick, rows, cols),
+			status:        itemStatus(items, s.pick),
 			size:          s.size,
 			sessionExists: true,
 		}
@@ -470,16 +471,19 @@ func (s *Server) applyKeyNoSession(key string) input.Action {
 	res := input.InterpretKey(
 		input.State{Picking: s.picking, Pick: s.pick},
 		key,
-		input.KeyCtx{Beacons: len(s.beacons)},
+		input.KeyCtx{Beacons: len(s.itemsLocked())},
 	)
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
-	connect := s.resolveConnect(res.Action)
+	connect, switchTo := s.resolvePick(res.Action, s.itemsLocked())
 	s.mu.Unlock()
 
 	if connect != "" {
 		log.Printf("[picker] %s", connect)
 		s.hub.broadcast(connect)
+	}
+	if switchTo != "" {
+		s.switchTo(switchTo)
 	}
 	s.pushIfChanged(true)
 	return res.Action
@@ -496,7 +500,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	res := input.InterpretKey(
 		input.State{Input: s.sess.input, Hist: s.sess.hist, Cmd: s.sess.cmd, Picking: s.picking, Pick: s.pick},
 		key,
-		input.KeyCtx{Awaiting: s.sess.lastAwaiting, History: s.sess.history, Beacons: len(s.beacons)},
+		input.KeyCtx{Awaiting: s.sess.lastAwaiting, History: s.sess.history, Beacons: len(s.itemsLocked())},
 	)
 	s.sess.input = res.State.Input
 	s.sess.cmd = res.State.Cmd
@@ -504,7 +508,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
 	a := res.Action
-	connect := s.resolveConnect(a)
+	connect, switchTo := s.resolvePick(a, s.itemsLocked())
 	switch a.Kind {
 	case "pan":
 		for i := 0; i < times; i++ {
@@ -543,6 +547,9 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	if connect != "" {
 		log.Printf("[picker] %s", connect)
 		s.hub.broadcast(connect)
+	}
+	if switchTo != "" {
+		s.switchTo(switchTo)
 	}
 
 	switch a.Kind {
