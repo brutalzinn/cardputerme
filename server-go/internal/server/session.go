@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"cardputerme/internal/screen"
@@ -30,6 +29,7 @@ type session struct {
 	cache        *mirrorCache
 	lastSig      string
 	lastAwaiting bool
+	stop         func()
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
@@ -84,12 +84,17 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 	json.NewEncoder(w).Encode(body)
 }
 
-// register adds a terminal under name. It is idempotent and never replaces a
-// live session: doing so would silently discard its backend and history.
+// register adds a terminal under name and starts WATCHING it. Without the
+// subscribe a registered session would render but never push, so a prompt in
+// any project but the current one would go unnoticed — which is the whole
+// point of one server owning many sessions.
+//
+// Idempotent, and it never replaces a live session: doing so would silently
+// discard its backend and history.
 func (s *Server) register(name, target, cwd string) *session {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if existing, ok := s.sessions[name]; ok {
+		s.mu.Unlock()
 		return existing
 	}
 	sess := newSession(name, terminal.CreateBackend(target, s.cfg.ScrollbackLines))
@@ -99,7 +104,21 @@ func (s *Server) register(name, target, cwd string) *session {
 	if s.sess == nil {
 		s.sess = sess
 	}
+	s.mu.Unlock()
+
+	sess.backend.EnsureSession(cwd)
+	sess.stop = sess.backend.Subscribe(func() { s.sessionChanged(name) }, func() { s.terminalGone(name) })
 	return sess
+}
+
+// sessionChanged pushes only when the CHANGED session is the one being viewed.
+// Without this every session's output re-pushed the current session's frame,
+// so unrelated projects made the mirror lag.
+func (s *Server) sessionChanged(name string) {
+	if s.currentName() != name {
+		return
+	}
+	s.schedulePush()
 }
 
 // drop removes a session. A dying terminal must never take the others with it,
@@ -109,6 +128,9 @@ func (s *Server) drop(name string) {
 	defer s.mu.Unlock()
 	if _, ok := s.sessions[name]; !ok {
 		return
+	}
+	if stop := s.sessions[name].stop; stop != nil {
+		defer stop()
 	}
 	delete(s.sessions, name)
 	kept := s.order[:0]
@@ -138,7 +160,13 @@ func (s *Server) terminalGone(name string) {
 		return
 	}
 	log.Printf("[expose] no sessions left — shutting down")
-	os.Exit(0)
+	s.shutdown()
+}
+
+// shutdown ends Run. Signalling beats os.Exit here: a library that kills the
+// process cannot be tested, and gives callers no chance to clean up.
+func (s *Server) shutdown() {
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 func (s *Server) sessionNames() []string {

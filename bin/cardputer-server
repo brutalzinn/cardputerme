@@ -18,9 +18,25 @@ if [ -z "$TMUX" ]; then
 fi
 STATE="${CARDPUTERME_DIR:-$HOME/.cardputerme}"
 mkdir -p "$STATE"
-PID_FILE="$STATE/$NAME.pid"
-if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-  echo "cardputerme — '$NAME' is already exposed (pick it on the Cardputer)"
+PID_FILE="$STATE/server.pid"
+PORT_FILE="$STATE/server.port"
+
+# ONE server per machine owns many sessions, so first try to ATTACH this
+# terminal to a server that is already running. Starting a second one is what
+# used to leave stale, mismatched-version exposures around.
+attach() {
+  [ -f "$PORT_FILE" ] || return 1
+  command -v curl >/dev/null 2>&1 || return 1
+  port="$(tr -dc '0-9' <"$PORT_FILE")"
+  [ -n "$port" ] || return 1
+  curl -fsS --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1 || return 1
+  curl -fsS --max-time 5 -X POST "http://127.0.0.1:$port/sessions" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$NAME\",\"session\":\"$SESSION\",\"cwd\":\"$DIR\"}" >/dev/null 2>&1 || return 1
+  echo "cardputerme — '$NAME' attached to the server on port $port (pick it on the Cardputer)"
+  return 0
+}
+if attach; then
   exit 0
 fi
 case "$(uname -s)" in
@@ -50,6 +66,7 @@ else
   echo "  install it: curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh" >&2
   exit 1
 fi
-SESSION_CWD="$DIR" SESSION="$SESSION" nohup "$BIN" "$NAME" >>"$STATE/$NAME.log" 2>&1 &
+LOG="$STATE/server.log"
+SESSION_CWD="$DIR" SESSION="$SESSION" nohup "$BIN" "$NAME" >>"$LOG" 2>&1 &
 echo "$!" >"$PID_FILE"
-echo "cardputerme — exposing '$NAME' (find it on the Cardputer) | log: $STATE/$NAME.log"
+echo "cardputerme — started the server and exposed '$NAME' (find it on the Cardputer) | log: $LOG"

@@ -155,3 +155,13 @@ func TestRestRegisterRejectsAnEmptyName(t *testing.T) {
 		t.Fatal("nothing must have been registered")
 	}
 }
+
+// Run must register the CLI's own terminal. It was dropped once during the
+// refactor and the server came up owning nothing, which no unit test caught.
+func TestRunRegistersTheCliSession(t *testing.T) {
+	s := New(Config{Name: "startup", Session: "startup", WrapCols: 20})
+	s.register(s.cfg.Name, sessionTarget(s.cfg), "")
+	if got := s.currentName(); got != "startup" {
+		t.Fatalf("current = %q, want the CLI's own session", got)
+	}
+}

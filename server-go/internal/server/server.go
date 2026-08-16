@@ -97,6 +97,9 @@ type Server struct {
 	picking   bool
 	pick      int
 
+	done      chan struct{}
+	closeOnce sync.Once
+
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
 
@@ -139,6 +142,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
 		sessions: map[string]*session{},
+		done:     make(chan struct{}),
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		size:     baseSize,
@@ -785,14 +789,14 @@ func (s *Server) Run() error {
 		return fmt.Errorf("no free port between %d and %d", portStart, portStart+portTries-1)
 	}
 	target := sessionTarget(s.cfg)
-	sess := s.register(s.cfg.Name, target, s.cfg.SessionCwd)
-	created, ok := sess.backend.EnsureSession(s.cfg.SessionCwd)
+	created, ok := terminal.CreateBackend(target, s.cfg.ScrollbackLines).EnsureSession(s.cfg.SessionCwd)
 	if !ok {
 		return fmt.Errorf("could not attach to or create terminal '%s'", target)
 	}
 	if created {
 		log.Printf("[expose] no terminal '%s' was running — created an empty one; run cardputerme from inside the terminal you want mirrored", target)
 	}
+	s.register(s.cfg.Name, target, s.cfg.SessionCwd)
 
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -800,12 +804,19 @@ func (s *Server) Run() error {
 	log.Printf("cardputerme — exposing '%s' on http://0.0.0.0:%d  (ws://…/ws)", s.cfg.Name, port)
 	log.Printf("  screen : dim after %v, off after %v (0 = never)", s.cfg.DimAfter, s.cfg.OffAfter)
 	log.Printf("  idle   : exit after %v with no device connected (0 = never)", s.cfg.IdleExit)
+	if err := publishPort(port); err != nil {
+		log.Printf("[expose] could not publish the port (%v) — `cardputerme` in another project will start a second server instead of attaching", err)
+	}
 	s.startBeacon(port)
 	s.armPowerTimer()
 	s.armIdleTimer()
 
-	stop := sess.backend.Subscribe(s.schedulePush, func() { s.terminalGone(sess.name) })
-	defer stop()
-
-	return http.ListenAndServe(":"+strconv.Itoa(port), mux)
+	srvErr := make(chan error, 1)
+	go func() { srvErr <- http.ListenAndServe(":"+strconv.Itoa(port), mux) }()
+	select {
+	case err := <-srvErr:
+		return err
+	case <-s.done:
+		return nil
+	}
 }
