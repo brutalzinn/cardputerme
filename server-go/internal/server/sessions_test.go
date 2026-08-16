@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -222,5 +223,24 @@ func TestRestDeleteSession(t *testing.T) {
 	}
 	if got := s.sessionNames(); len(got) != 1 || got[0] != "lara" {
 		t.Fatalf("sessions = %v", got)
+	}
+}
+
+// Registering must ATTACH to an existing terminal, never conjure one. When
+// register called EnsureSession it created real tmux sessions as a side effect
+// — the test suite littered the developer's machine with them.
+func TestRegisterDoesNotCreateATerminal(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	name := "cardputerme-mustnotexist"
+	exec.Command("tmux", "kill-session", "-t", name).Run()
+	t.Cleanup(func() { exec.Command("tmux", "kill-session", "-t", name).Run() })
+
+	s := New(Config{Name: "m", WrapCols: 20})
+	s.register(name, name, "/tmp")
+
+	if err := exec.Command("tmux", "has-session", "-t", name).Run(); err == nil {
+		t.Fatal("register created a tmux session; only the CLI may create terminals")
 	}
 }

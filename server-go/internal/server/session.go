@@ -98,6 +98,10 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 	json.NewEncoder(w).Encode(body)
 }
 
+// register ATTACHES to an existing terminal and starts watching it. It must
+// never create one — that is the CLI's job, with the user's cwd. Creating here
+// conjures empty tmux sessions for any name anyone posts.
+//
 // register adds a terminal under name and starts WATCHING it. Without the
 // subscribe a registered session would render but never push, so a prompt in
 // any project but the current one would go unnoticed — which is the whole
@@ -120,7 +124,6 @@ func (s *Server) register(name, target, cwd string) *session {
 	}
 	s.mu.Unlock()
 
-	sess.backend.EnsureSession(cwd)
 	sess.stop = sess.backend.Subscribe(
 		func() { s.emit(sessionEvent{name: name, kind: evChanged}) },
 		func() { s.emit(sessionEvent{name: name, kind: evGone}) },
