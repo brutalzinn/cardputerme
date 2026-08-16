@@ -89,7 +89,13 @@ func (g *Gauge) Percent() (int, bool) {
 func (g *Gauge) Charging() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.wired || g.rising
+	return g.charging()
+}
+
+func (g *Gauge) Status() (int, bool, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.shown, g.known, g.charging()
 }
 
 func (g *Gauge) settling(now time.Time) bool {

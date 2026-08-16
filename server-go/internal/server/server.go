@@ -17,6 +17,7 @@ import (
 	"cardputerme/internal/battery"
 	"cardputerme/internal/commands"
 	"cardputerme/internal/discovery"
+	"cardputerme/internal/idle"
 	"cardputerme/internal/input"
 	"cardputerme/internal/power"
 	"cardputerme/internal/repeat"
@@ -55,6 +56,9 @@ type Config struct {
 	RepeatInterval  time.Duration
 	PushDebounce    time.Duration
 	UsbMilliVolts   int
+	IdleExit        time.Duration
+	SoundsDir       string
+	NotifySound     string
 	HidePrefixes    []string
 }
 
@@ -92,6 +96,8 @@ type Server struct {
 	cache        *mirrorCache
 	lastSig      string
 	lastAwaiting bool
+	soundBase    string
+	lastLed      string
 
 	pushMu    sync.Mutex
 	pushTimer *time.Timer
@@ -100,6 +106,9 @@ type Server struct {
 	powerDeadline deadline
 
 	gauge *battery.Gauge
+
+	idle         *idle.Tracker
+	idleDeadline deadline
 
 	repeat         *repeat.Holder
 	repeatDeadline deadline
@@ -140,6 +149,7 @@ func New(cfg Config) *Server {
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
 		gauge:    battery.NewGauge(batteryPolicy),
+		idle:     idle.NewTracker(idle.Policy{After: cfg.IdleExit}, time.Now()),
 	}
 }
 
@@ -325,8 +335,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	pct, known := s.gauge.Percent()
-	bat := battery.Label(pct, known, s.gauge.Charging())
+	bat := battery.Label(s.gauge.Status())
 	segs := []string{"[" + s.cfg.Name + "]"}
 	for _, seg := range []string{title, hint, bat} {
 		if seg != "" {
@@ -404,6 +413,10 @@ func (s *Server) pushIfChanged(force bool) {
 	}
 	if s.cfg.Notify && freshQuestion {
 		s.hub.broadcast(`{"type":"notify","reason":"question"}`)
+		s.signalAttention()
+	}
+	if !st.awaiting {
+		s.setLed(ledOff)
 	}
 }
 
@@ -417,6 +430,15 @@ func (s *Server) applyPower(st power.State, changed bool) {
 		s.hub.broadcast(powerMessage(st))
 	}
 	s.armPowerTimer()
+}
+
+func (s *Server) armIdleTimer() {
+	now := time.Now()
+	if s.idle.Expired(now) {
+		log.Printf("[expose] no device has connected to '%s' for %v — shutting down (IDLE_EXIT_H=0 disables this)", s.cfg.Name, s.cfg.IdleExit)
+		os.Exit(0)
+	}
+	s.idleDeadline.arm(s.idle.Until(now), s.armIdleTimer)
 }
 
 func (s *Server) armPowerTimer() {
@@ -495,8 +517,7 @@ func onExternalPower(usb bool, milliVolts, threshold int) bool {
 func (s *Server) handleReport(usb bool, milliVolts int, now time.Time) {
 	wired := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
 	s.gauge.Observe(battery.Reading{Millivolts: milliVolts, External: wired, At: now})
-	external := s.gauge.Charging()
-	pct, known := s.gauge.Percent()
+	pct, known, external := s.gauge.Status()
 	log.Printf("[power] device reports usb=%v mv=%d (threshold %d) — external=%v battery=%q", usb, milliVolts, s.cfg.UsbMilliVolts, external, battery.Label(pct, known, external))
 	s.applyPower(s.power.SetExternalPower(now, external))
 	s.schedulePush()
@@ -553,9 +574,14 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.add(c)
+	s.setSoundBase(c.LocalAddr().String())
+	s.idle.Connect(time.Now())
+	s.armIdleTimer()
 	log.Printf("[ws] connect %s (clients=%d)", c.RemoteAddr(), s.hub.count())
 	defer func() {
 		s.hub.remove(c)
+		s.idle.Disconnect(time.Now())
+		s.armIdleTimer()
 		log.Printf("[ws] close %s", c.RemoteAddr())
 	}()
 
@@ -720,11 +746,14 @@ func (s *Server) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ws", s.wsHandler)
+	mux.Handle(soundPrefix, s.soundHandler())
 
 	log.Printf("cardputerme — exposing '%s' on http://0.0.0.0:%d  (ws://…/ws)", s.cfg.Name, port)
 	log.Printf("  screen : dim after %v, off after %v (0 = never)", s.cfg.DimAfter, s.cfg.OffAfter)
+	log.Printf("  idle   : exit after %v with no device connected (0 = never)", s.cfg.IdleExit)
 	s.startBeacon(port)
 	s.armPowerTimer()
+	s.armIdleTimer()
 
 	stop := s.backend.Subscribe(s.schedulePush, func() {
 		log.Printf("[expose] terminal '%s' is gone — shutting down", s.cfg.Name)

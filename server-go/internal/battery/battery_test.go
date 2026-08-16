@@ -185,3 +185,20 @@ func TestLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusMatchesTheIndividualReads(t *testing.T) {
+	g := NewGauge(testPolicy())
+	pct, known, charging := g.Status()
+	if known || charging || pct != 0 {
+		t.Fatalf("fresh gauge: got %d,%v,%v", pct, known, charging)
+	}
+	g.Observe(Reading{Millivolts: 3700, External: true, At: base})
+	pct, known, charging = g.Status()
+	p2, k2 := g.Percent()
+	if pct != p2 || known != k2 || charging != g.Charging() {
+		t.Fatal("Status must agree with Percent and Charging")
+	}
+	if !charging || pct != 50 {
+		t.Fatalf("got %d, charging=%v", pct, charging)
+	}
+}

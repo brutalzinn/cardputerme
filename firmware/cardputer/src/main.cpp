@@ -3,6 +3,7 @@
 #include <WiFiUdp.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <vector>
 
 #ifndef ENV_WIFI_SSID
@@ -27,6 +28,10 @@ const unsigned long BEACON_TTL_MS = 6500;
 #define HEADER_H    14
 #define STATUS_H    16
 #define SBAR_W      3
+
+#define RGB_LED_PIN   21
+#define LED_PULSE_MS  600
+#define WAV_MAX_BYTES 200000
 
 #define COL_BG      0x0000
 #define COL_HDR     0x10A2
@@ -323,6 +328,80 @@ void beep(bool question) {
   M5Cardputer.Speaker.tone(1600, 70);
 }
 
+uint8_t g_ledR = 0, g_ledG = 0, g_ledB = 0;
+String g_ledPattern = "off";
+unsigned long g_ledTick = 0;
+bool g_ledPhase = true;
+
+void paintLed() {
+  bool dark = g_ledPattern == "off" || (g_ledPattern == "pulse" && !g_ledPhase);
+  if (dark) {
+    neopixelWrite(RGB_LED_PIN, 0, 0, 0);
+    return;
+  }
+  neopixelWrite(RGB_LED_PIN, g_ledR, g_ledG, g_ledB);
+}
+
+void applyLed(JsonDocument& doc) {
+  g_ledR = doc["r"] | 0;
+  g_ledG = doc["g"] | 0;
+  g_ledB = doc["b"] | 0;
+  g_ledPattern = String((const char*)(doc["pattern"] | "off"));
+  g_ledPhase = true;
+  g_ledTick = millis();
+  paintLed();
+}
+
+void tickLed() {
+  if (g_ledPattern != "pulse") return;
+  unsigned long now = millis();
+  if (now - g_ledTick < LED_PULSE_MS) return;
+  g_ledTick = now;
+  g_ledPhase = !g_ledPhase;
+  paintLed();
+}
+
+uint8_t* g_wav = nullptr;
+size_t g_wavCap = 0;
+
+bool loadWav(const char* url, size_t& outLen) {
+  HTTPClient http;
+  if (!http.begin(url)) return false;
+  if (http.GET() != HTTP_CODE_OK) { http.end(); return false; }
+  int len = http.getSize();
+  if (len <= 0 || len > WAV_MAX_BYTES) { http.end(); return false; }
+  if ((size_t)len > g_wavCap) {
+    uint8_t* grown = (uint8_t*)realloc(g_wav, len);
+    if (!grown) { http.end(); return false; }
+    g_wav = grown;
+    g_wavCap = len;
+  }
+  WiFiClient* stream = http.getStreamPtr();
+  int got = 0;
+  while (got < len && http.connected()) {
+    int n = stream->readBytes(g_wav + got, len - got);
+    if (n <= 0) break;
+    got += n;
+  }
+  http.end();
+  outLen = got;
+  return got == len;
+}
+
+void applySound(JsonDocument& doc) {
+  const char* url = doc["url"] | "";
+  if (strlen(url) == 0) {
+    M5Cardputer.Speaker.tone(doc["freq"] | 1200, doc["ms"] | 90);
+    return;
+  }
+  size_t len = 0;
+  if (loadWav(url, len)) {
+    M5Cardputer.Speaker.playWav(g_wav, len);
+    return;
+  }
+  M5Cardputer.Speaker.tone(1200, 90);
+}
+
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
   g_size = doc["size"] | 2;
@@ -443,9 +522,10 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       const char* t = doc["type"] | "";
       if (strcmp(t, "display") == 0) { applyDisplay(doc); return; }
       if (strcmp(t, "power") == 0) { applyPower(powerFromName(doc["state"] | "on")); return; }
+      if (strcmp(t, "led") == 0) { applyLed(doc); return; }
+      if (strcmp(t, "sound") == 0) { applySound(doc); return; }
       if (strcmp(t, "notify") == 0) {
         bool q = (strcmp(doc["reason"] | "", "question") == 0);
-        beep(q);
         showToast(q ? "Answer needed" : "New output");
         drawHeader();
         return;
@@ -575,6 +655,7 @@ void loop() {
   if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
 
   if (g_haveTarget && wsConnected) tickSupply();
+  tickLed();
 
   if (M5Cardputer.BtnA.wasPressed()) togglePower();
 

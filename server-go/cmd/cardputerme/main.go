@@ -45,6 +45,14 @@ func envList(key, def string) []string {
 	return out
 }
 
+func defaultSoundsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cardputerme", "sounds")
+}
+
 func envStr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -71,6 +79,9 @@ func main() {
 		RepeatDelay:     time.Duration(envInt("REPEAT_DELAY_MS", 350)) * time.Millisecond,
 		RepeatInterval:  time.Duration(envInt("REPEAT_INTERVAL_MS", 90)) * time.Millisecond,
 		PushDebounce:    time.Duration(envInt("PUSH_DEBOUNCE_MS", 15)) * time.Millisecond,
+		IdleExit:        time.Duration(envInt("IDLE_EXIT_H", 12)) * time.Hour,
+		SoundsDir:       envStr("SOUNDS_DIR", defaultSoundsDir()),
+		NotifySound:     envStr("NOTIFY_SOUND", "notify.wav"),
 		UsbMilliVolts:   envInt("USB_MV", 4200),
 		HidePrefixes:    envList("HIDE_PREFIXES", "Tip:"),
 	}
