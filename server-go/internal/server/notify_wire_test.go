@@ -126,7 +126,10 @@ func notifyConfig() Config {
 	return Config{WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true}
 }
 
-func TestWireFreshQuestionSendsNotifyLedAndSound(t *testing.T) {
+// A question the SERVER noticed must reach the human through the same channels
+// an HTTP caller gets — LED, sound, and the header line. It used to broadcast a
+// `notify` frame instead, which no client has parsed since #45 deleted the toast.
+func TestWireFreshQuestionSignalsLedSoundAndHeader(t *testing.T) {
 	d := dialFake(t, "wiretest-notify", notifyConfig())
 	d.await([]string{"power"}, 5*time.Second)
 
@@ -136,10 +139,10 @@ func TestWireFreshQuestionSendsNotifyLedAndSound(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	d.srv.pushIfChanged(false)
 
-	got := d.await([]string{"notify", "led", "sound"}, 6*time.Second)
+	got := d.await([]string{"led", "sound"}, 6*time.Second)
 
-	if got["notify"].Reason != "question" {
-		t.Fatalf("notify reason = %q, want question", got["notify"].Reason)
+	if h := headerText(d.srv.headerCells()); !strings.Contains(h, awaitingAlert) {
+		t.Fatalf("the server's own detection must reach the header too, got %q", h)
 	}
 	if got["led"].Pattern != "pulse" {
 		t.Fatalf("a pending question pulses, got %q", got["led"].Pattern)

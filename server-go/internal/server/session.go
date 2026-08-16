@@ -74,8 +74,7 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) registerHandler(w http.ResponseWriter, r *http.Request) {
 	var req sessionRequest
-	if json.NewDecoder(r.Body).Decode(&req) != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
@@ -92,6 +91,16 @@ func (s *Server) registerHandler(w http.ResponseWriter, r *http.Request) {
 		"current":  s.currentName(),
 		"sessions": s.sessionNames(),
 	})
+}
+
+// decodeJSON replies 400 and reports false when the body is not the shape the
+// handler asked for, so handlers stay a guard clause rather than a funnel.
+func decodeJSON(w http.ResponseWriter, r *http.Request, into any) bool {
+	if json.NewDecoder(r.Body).Decode(into) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
@@ -203,10 +212,9 @@ func (s *Server) pushNoSessions(force bool) {
 	if s.picking {
 		st = s.composeMirror(nil, "", "", false)
 	}
-	sg := sig(st)
-	changed := sg != s.lastNoSig || force
-	s.lastNoSig = sg
 	msg := displayMessage(st)
+	changed := msg != s.lastNoSig || force
+	s.lastNoSig = msg
 	s.mu.Unlock()
 	if changed {
 		s.hub.broadcastFrame(msg)

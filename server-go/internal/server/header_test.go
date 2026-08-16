@@ -20,7 +20,8 @@ func headerText(cells []screen.Cell) string {
 func TestHeaderShowsWifiAndBattery(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
 	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
-	s.setWifi(true)
+	wifiUp := true
+	s.applyWifi(&wifiUp)
 
 	got := headerText(s.headerCells())
 	if !strings.Contains(got, "WiFi") {
@@ -33,7 +34,8 @@ func TestHeaderShowsWifiAndBattery(t *testing.T) {
 
 func TestHeaderShowsWifiDown(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
-	s.setWifi(false)
+	wifiDown := false
+	s.applyWifi(&wifiDown)
 	if got := headerText(s.headerCells()); !strings.Contains(got, "NoWiFi") {
 		t.Fatalf("header = %q", got)
 	}
@@ -43,9 +45,11 @@ func TestHeaderShowsWifiDown(t *testing.T) {
 // how to show it is the server's call.
 func TestWifiIsAReportedFactNotADeviceDecision(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
-	s.setWifi(false)
+	wifiDown := false
+	s.applyWifi(&wifiDown)
 	down := headerText(s.headerCells())
-	s.setWifi(true)
+	wifiUp := true
+	s.applyWifi(&wifiUp)
 	up := headerText(s.headerCells())
 	if down == up {
 		t.Fatal("the reported fact must change what the server composes")
@@ -56,7 +60,8 @@ func TestWifiIsAReportedFactNotADeviceDecision(t *testing.T) {
 // radio is down" — an absent fact is unknown, not false.
 func TestAbsentWifiFactLeavesTheHeaderAlone(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
-	s.setWifi(true)
+	wifiUp := true
+	s.applyWifi(&wifiUp)
 	s.applyWifi(nil)
 	if got := headerText(s.headerCells()); strings.Contains(got, "NoWiFi") {
 		t.Fatalf("a silent device is not a disconnected one, got %q", got)
@@ -72,7 +77,8 @@ func TestAbsentWifiFactLeavesTheHeaderAlone(t *testing.T) {
 // only sometimes is one you cannot trust at a glance.
 func TestBatteryIsAlwaysInTheHeader(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
-	s.setWifi(true)
+	wifiUp := true
+	s.applyWifi(&wifiUp)
 	if got := headerText(s.headerCells()); !strings.Contains(got, unknownBattery) {
 		t.Fatalf("with no reading yet the slot must still be there, got %q", got)
 	}
@@ -95,7 +101,8 @@ func TestUnknownBatteryIsNotAFakeNumber(t *testing.T) {
 // acceptance test for #45.
 func TestHeaderIsComposedEntirelyServerSide(t *testing.T) {
 	s := withSession(New(Config{Name: "h", Session: "h", WrapCols: 20}))
-	s.setWifi(true)
+	wifiUp := true
+	s.applyWifi(&wifiUp)
 	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
 	st := s.composeMirror(nil, "status", "", false)
 	if len(st.header) == 0 {

@@ -47,11 +47,7 @@ func LineColor(text string, awaiting bool) uint16 {
 	return Colors.Text
 }
 
-func BuildDisplay(body []Line, statusText string, size int) DisplayMessage {
-	return BuildDisplayHeader(body, statusText, nil, size)
-}
-
-func BuildDisplayHeader(body []Line, statusText string, header []Cell, size int) DisplayMessage {
+func BuildDisplay(body []Line, statusText string, header []Cell, size int) DisplayMessage {
 	cells := make([]Cell, 0, len(body))
 	for _, l := range body {
 		cells = append(cells, Cell{Text: l.Text, Color: l.Color})

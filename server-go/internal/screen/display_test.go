@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildDisplayAssembles(t *testing.T) {
-	msg := BuildDisplay([]Line{{"hello world", Colors.Text}}, "[generic] ready", 2)
+	msg := BuildDisplay([]Line{{"hello world", Colors.Text}}, "[generic] ready", nil, 2)
 	if msg.Type != "display" || msg.Size != 2 || len(msg.Body) != 1 {
 		t.Fatalf("got %+v", msg)
 	}
@@ -32,14 +32,14 @@ func TestLineColorRules(t *testing.T) {
 }
 
 func TestBuildDisplayEmpty(t *testing.T) {
-	msg := BuildDisplay([]Line{}, "", 2)
+	msg := BuildDisplay([]Line{}, "", nil, 2)
 	if len(msg.Body) != 0 || msg.Status.Text != "" || msg.Status.Color != Colors.Status {
 		t.Fatalf("got %+v", msg)
 	}
 }
 
 func TestDisplayJSONShape(t *testing.T) {
-	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", 3))
+	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", nil, 3))
 	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"header":[],"status":{"text":"s","color":2047}}`
 	if string(b) != want {
 		t.Fatalf("json = %s", b)
@@ -51,7 +51,7 @@ func TestDisplayJSONShape(t *testing.T) {
 // what it says changes with a restart and never with a re-flash (#45).
 func TestDisplayCarriesAComposedHeader(t *testing.T) {
 	header := []Cell{{Text: "WiFi", Color: Colors.Status}, {Text: "  53%", Color: Colors.Dim}}
-	msg := BuildDisplayHeader([]Line{{"hi", 0xFFFF}}, "s", header, 2)
+	msg := BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", header, 2)
 	if len(msg.Header) != 2 || msg.Header[1].Text != "  53%" {
 		t.Fatalf("header = %+v", msg.Header)
 	}
@@ -64,7 +64,7 @@ func TestDisplayCarriesAComposedHeader(t *testing.T) {
 // A nil header must serialize as an empty list, never null: the device iterates
 // it, and a renderer that has to special-case null is a renderer that decides.
 func TestDisplayHeaderIsNeverNull(t *testing.T) {
-	b, _ := json.Marshal(BuildDisplayHeader(nil, "s", nil, 2))
+	b, _ := json.Marshal(BuildDisplay(nil, "s", nil, 2))
 	if !strings.Contains(string(b), `"header":[]`) {
 		t.Fatalf("json = %s", b)
 	}

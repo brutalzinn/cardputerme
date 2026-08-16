@@ -32,10 +32,6 @@ func ledMessage(l led) string {
 	return fmt.Sprintf(`{"type":"led","r":%d,"g":%d,"b":%d,"pattern":%q}`, l.R, l.G, l.B, pattern)
 }
 
-func notifyMessage(session string) string {
-	return `{"type":"notify","reason":"question","session":` + strconv.Quote(session) + `}`
-}
-
 func soundMessage(url string) string {
 	return `{"type":"sound","url":` + strconv.Quote(url) + `}`
 }

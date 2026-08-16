@@ -40,13 +40,13 @@ const unsigned long BEACON_TTL_MS = 6500;
 #define COL_TEXT    0xFFFF
 #define COL_ACCENT  0x07FF
 #define COL_DIM     0x8410
-#define COL_OK      0x07E6
 #define COL_WARN    0xFD20
 
 struct Line { String text; uint16_t color; };
 std::vector<Line> g_lines;
 String   g_status = "";
 std::vector<Line> g_header;
+bool     g_hadFrame = false;
 uint16_t g_statusColor = COL_ACCENT;
 bool     g_sessionExists = false;
 int      g_page = 0;
@@ -65,7 +65,6 @@ std::vector<Found> g_found;
 bool g_haveTarget = false;
 IPAddress g_targetIp;
 uint16_t g_targetPort = 0;
-String g_targetName = "";
 bool g_listDirty = false;
 
 enum PowerState { POWER_ON, POWER_DIM, POWER_OFF };
@@ -115,7 +114,7 @@ void drawHeader() {
   d.fillRect(0, 0, SCR_W, HEADER_H, COL_HDR);
   d.setTextSize(1);
   d.setCursor(3, 4);
-  if (g_header.empty()) {
+  if (!g_hadFrame) {
     d.setTextColor(COL_WARN, COL_HDR);
     d.print(wifiUp() ? "connecting..." : "no wifi");
     return;
@@ -231,7 +230,6 @@ void connectToFound(int idx) {
   if (idx < 0 || idx >= (int)g_found.size()) return;
   g_targetIp = g_found[idx].ip;
   g_targetPort = g_found[idx].port;
-  g_targetName = g_found[idx].name;
   g_haveTarget = true;
   g_lines.clear();
   g_status = "";
@@ -396,16 +394,21 @@ void applySound(JsonDocument& doc) {
   g_pendingSound = String(url);
 }
 
-void applyDisplay(JsonDocument& doc) {
-  g_sessionExists = doc["sessionExists"] | true;
-  g_size = doc["size"] | 2;
-  g_header.clear();
-  for (JsonObject o : doc["header"].as<JsonArray>()) {
+void readCells(JsonArray from, std::vector<Line>& into) {
+  into.clear();
+  for (JsonObject o : from) {
     Line cell;
     cell.text = String((const char*)(o["text"] | ""));
     cell.color = (uint16_t)((uint32_t)(o["color"] | (uint32_t)COL_TEXT));
-    g_header.push_back(cell);
+    into.push_back(cell);
   }
+}
+
+void applyDisplay(JsonDocument& doc) {
+  g_hadFrame = true;
+  g_sessionExists = doc["sessionExists"] | true;
+  g_size = doc["size"] | 2;
+  readCells(doc["header"].as<JsonArray>(), g_header);
   JsonObject status = doc["status"];
   String newStatus = String((const char*)(status["text"] | ""));
   if (newStatus != g_status) g_statusOffset = 0;
@@ -413,14 +416,7 @@ void applyDisplay(JsonDocument& doc) {
   g_statusColor = (uint16_t)((uint32_t)(status["color"] | (uint32_t)COL_ACCENT));
 
   int prevPage = g_page, prevPages = pageCount();
-  g_lines.clear();
-  JsonArray body = doc["body"].as<JsonArray>();
-  for (JsonObject o : body) {
-    Line ln;
-    ln.text = String((const char*)(o["text"] | ""));
-    ln.color = (uint16_t)((uint32_t)(o["color"] | (uint32_t)COL_TEXT));
-    g_lines.push_back(ln);
-  }
+  readCells(doc["body"].as<JsonArray>(), g_lines);
   int pages = pageCount();
   bool atNewest = follow || prevPage >= prevPages;
   if (atNewest || g_page > pages - 1) g_page = pages ? pages - 1 : 0;
@@ -537,6 +533,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_DISCONNECTED:
       wsConnected = false;
       if (!g_haveTarget) break;
+      g_hadFrame = false;
       g_header.clear();
       redraw();
       break;
@@ -681,14 +678,6 @@ void loop() {
   if (M5Cardputer.BtnA.wasPressed()) togglePower();
 
   handleKeyboard();
-
-
-  static unsigned long battTick = 0;
-  if (millis() - battTick > 15000) {
-    battTick = millis();
-    drawHeader();
-  }
-
   tickStatusMarquee();
 
   delay(5);

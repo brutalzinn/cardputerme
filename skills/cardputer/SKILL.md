@@ -36,7 +36,7 @@ curl -sS -X POST "http://127.0.0.1:$port/notify" \
   -d '{"session":"'"$(basename "$PWD")"'","text":"tests still running after 5m"}'
 ```
 
-The reply is `{"delivered":true|false,"notify":true|false}`. **`delivered:false` is not an error** — it means the user ran `;notify 0` on the device and asked for silence. Report that plainly and do not retry or route around it.
+The reply is `{"delivered":true|false}`. **`delivered:false` is not an error** — it means the user ran `;notify 0` on the device and asked for silence. Report that plainly and do not retry or route around it.
 
 **When to notify — the bar is "the user would want to be interrupted":**
 

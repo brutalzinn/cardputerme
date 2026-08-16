@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -17,6 +16,11 @@ const defaultAlert = "needs you"
 // about eleven of them.
 const alertWidth = 26
 
+// awaitingAlert is what the server says when IT noticed rather than being told.
+// Terse on purpose: prefixed with a session name it still has to fit alertWidth,
+// and "gitme: waiting for y" is worse than saying less.
+const awaitingAlert = "waiting"
+
 type alertRequest struct {
 	Session string `json:"session"`
 	Text    string `json:"text"`
@@ -27,11 +31,11 @@ type alertRequest struct {
 // nothing about the caller — it is handed a name and a line of text, and the
 // policy for what to do with them lives here.
 func (s *Server) raiseAlert(session, text string) bool {
+	line := clip(alertLine(session, text), alertWidth)
 	if !s.NotifyEnabled() {
-		log.Printf("[notify] %q silenced by ;notify 0", alertLine(session, text))
+		log.Printf("[notify] %q silenced by ;notify 0", line)
 		return false
 	}
-	line := alertLine(session, text)
 	s.mu.Lock()
 	s.alert = line
 	s.mu.Unlock()
@@ -70,13 +74,11 @@ func (s *Server) notifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req alertRequest
-	if json.NewDecoder(r.Body).Decode(&req) != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	delivered := s.raiseAlert(strings.TrimSpace(req.Session), strings.TrimSpace(req.Text))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"delivered": delivered,
-		"notify":    s.NotifyEnabled(),
-	})
+	// One field, because there is one fact: did the alert go out. Reporting the
+	// switch separately said the same thing twice.
+	writeJSON(w, http.StatusOK, map[string]any{"delivered": delivered})
 }

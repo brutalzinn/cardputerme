@@ -431,14 +431,9 @@ func gridTail(grid []screen.Line, status string) string {
 }
 
 func displayMessage(st stateResult) string {
-	b, _ := json.Marshal(screen.BuildDisplayHeader(st.lines, st.status, st.header, st.size))
+	b, _ := json.Marshal(screen.BuildDisplay(st.lines, st.status, st.header, st.size))
 	return string(b)
 }
-
-// sig is the frame the device would draw. Deriving it from the message itself
-// means a new field can never be added without also being noticed as a change —
-// the battery badge was invisible for exactly that reason.
-func sig(st stateResult) string { return displayMessage(st) }
 
 func (s *Server) pushIfChanged(force bool) {
 	s.mu.Lock()
@@ -455,10 +450,13 @@ func (s *Server) pushIfChanged(force bool) {
 		return
 	}
 	st := s.stateFrom(pane, ok)
-	sg := sig(st)
-	changed := sg != s.sess.lastSig || force
+	// The frame IS the signature: comparing the bytes the device would draw means
+	// a new field can never be added without also being noticed as a change — the
+	// battery badge was invisible for exactly that reason.
+	msg := displayMessage(st)
+	changed := msg != s.sess.lastSig || force
 	if changed {
-		s.sess.lastSig = sg
+		s.sess.lastSig = msg
 	}
 	freshQuestion := st.awaiting && !s.sess.lastAwaiting
 	awaitingChanged := st.awaiting != s.sess.lastAwaiting
@@ -466,7 +464,6 @@ func (s *Server) pushIfChanged(force bool) {
 		s.sess.view.Follow = true
 	}
 	s.sess.lastAwaiting = st.awaiting
-	msg := displayMessage(st)
 	s.mu.Unlock()
 
 	if awaitingChanged {
@@ -475,9 +472,8 @@ func (s *Server) pushIfChanged(force bool) {
 	if changed {
 		s.hub.broadcastFrame(msg)
 	}
-	if s.notify && freshQuestion {
-		s.hub.broadcast(`{"type":"notify","reason":"question"}`)
-		s.signalAttention()
+	if freshQuestion {
+		s.raiseAlert(s.currentName(), awaitingAlert)
 	}
 }
 
@@ -588,9 +584,9 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	var echo string
 	if s.sess.cache != nil {
 		st := s.composeMirror(s.sess.cache.grid, s.sess.cache.status, s.sess.cache.title, s.sess.cache.awaiting)
-		if sg := sig(st); sg != s.sess.lastSig {
-			s.sess.lastSig = sg
-			echo = displayMessage(st)
+		if msg := displayMessage(st); msg != s.sess.lastSig {
+			s.sess.lastSig = msg
+			echo = msg
 		}
 	}
 	s.mu.Unlock()
@@ -611,9 +607,9 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		sess.reply = reply
 		if sess.cache != nil {
 			st := s.composeMirror(sess.cache.grid, sess.cache.status, sess.cache.title, sess.cache.awaiting)
-			if sg := sig(st); sg != sess.lastSig {
-				sess.lastSig = sg
-				echo = displayMessage(st)
+			if msg := displayMessage(st); msg != sess.lastSig {
+				sess.lastSig = msg
+				echo = msg
 			}
 		}
 		s.mu.Unlock()

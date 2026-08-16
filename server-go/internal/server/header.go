@@ -8,19 +8,15 @@ import (
 // unknownBattery keeps the slot occupied before the device has ever reported.
 const unknownBattery = "--%"
 
-func (s *Server) setWifi(up bool) {
-	s.mu.Lock()
-	s.wifi = up
-	s.mu.Unlock()
-}
-
 // applyWifi takes the fact the device reported. Absent means the firmware
 // predates the field, not that the radio is down.
 func (s *Server) applyWifi(up *bool) {
 	if up == nil {
 		return
 	}
-	s.setWifi(*up)
+	s.mu.Lock()
+	s.wifi = *up
+	s.mu.Unlock()
 }
 
 func wifiCell(up bool) screen.Cell {
@@ -42,7 +38,7 @@ func (s *Server) headerCells() []screen.Cell {
 func (s *Server) headerCellsLocked() []screen.Cell {
 	cells := []screen.Cell{}
 	if s.alert != "" {
-		cells = append(cells, screen.Cell{Text: clip(s.alert, alertWidth) + " ", Color: screen.Colors.Ask})
+		cells = append(cells, screen.Cell{Text: s.alert + " ", Color: screen.Colors.Ask})
 	}
 	cells = append(cells, wifiCell(s.wifi))
 	return append(cells, batteryCell(battery.Label(s.gauge.Status())))

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"time"
 )
 
@@ -61,9 +60,7 @@ func (s *Server) checkSession(name string) {
 	if !fire {
 		return
 	}
-	log.Printf("[notify] %q is waiting for you", name)
-	s.hub.broadcast(notifyMessage(name))
-	s.signalAttention()
+	s.raiseAlert(name, awaitingAlert)
 	if s.onNotify != nil {
 		s.onNotify(name)
 	}
