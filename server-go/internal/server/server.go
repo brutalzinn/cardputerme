@@ -96,6 +96,7 @@ type Server struct {
 	picking   bool
 	pick      int
 
+	events    chan sessionEvent
 	done      chan struct{}
 	closeOnce sync.Once
 
@@ -141,6 +142,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
 		sessions: map[string]*session{},
+		events:   make(chan sessionEvent, eventQueue),
 		done:     make(chan struct{}),
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
@@ -398,12 +400,19 @@ func sig(st stateResult) string {
 }
 
 func (s *Server) pushIfChanged(force bool) {
-	if s.currentName() == "" {
+	s.mu.Lock()
+	sess := s.sess
+	s.mu.Unlock()
+	if sess == nil {
 		s.pushNoSessions(force)
 		return
 	}
-	pane, ok := s.sess.backend.Capture() // read-only subprocess — kept OUT of the lock
+	pane, ok := sess.backend.Capture() // read-only subprocess — kept OUT of the lock
 	s.mu.Lock()
+	if s.sess != sess { // switched while capturing — that session will push its own frame
+		s.mu.Unlock()
+		return
+	}
 	st := s.stateFrom(pane, ok)
 	sg := sig(st)
 	changed := sg != s.sess.lastSig || force
@@ -498,7 +507,8 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	}
 	s.mu.Lock()
 	items := s.itemsLocked()
-	s.sess.reply = ""
+	sess := s.sess
+	sess.reply = ""
 	res := input.InterpretKey(
 		input.State{Input: s.sess.input, Hist: s.sess.hist, Cmd: s.sess.cmd, Picking: s.picking, Pick: s.pick},
 		key,
@@ -556,9 +566,9 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 
 	switch a.Kind {
 	case "send":
-		s.sess.backend.SendText(a.Text)
+		sess.backend.SendText(a.Text)
 	case "pressKey":
-		s.sess.backend.SendKeyTimes(a.Key, times)
+		sess.backend.SendKeyTimes(a.Key, times)
 	}
 	if echo != "" {
 		s.hub.broadcastFrame(echo)
@@ -657,14 +667,16 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var m struct {
-			Type   string   `json:"type"`
-			Key    string   `json:"key"`
-			Text   string   `json:"text"`
-			State  string   `json:"state"`
-			Usb    bool     `json:"usb"`
-			Mv     int      `json:"mv"`
-			List   []beacon `json:"list"`
-			Events []struct {
+			Type    string   `json:"type"`
+			Key     string   `json:"key"`
+			Text    string   `json:"text"`
+			State   string   `json:"state"`
+			Usb     bool     `json:"usb"`
+			Mv      int      `json:"mv"`
+			Heap    int      `json:"heap"`
+			HeapMin int      `json:"heapmin"`
+			List    []beacon `json:"list"`
+			Events  []struct {
 				Key   string `json:"key"`
 				State string `json:"state"`
 			} `json:"events"`
@@ -674,6 +686,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		switch m.Type {
 		case "report":
+			log.Printf("[device] heap=%d minheap=%d", m.Heap, m.HeapMin)
 			s.handleReport(m.Usb, m.Mv, time.Now())
 		case "beacons":
 			s.handleBeacons(m.List)
@@ -702,12 +715,24 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
-	exists := s.sess.backend.Exists()
 	s.mu.Lock()
-	awaiting := s.sess.lastAwaiting
+	sess := s.sess
+	awaiting := sess != nil && sess.lastAwaiting
 	s.mu.Unlock()
-	json.NewEncoder(w).Encode(map[string]any{
-		"ok": true, "name": s.cfg.Name, "exists": exists, "notify": s.cfg.Notify, "awaiting": awaiting,
+
+	exists := false
+	if sess != nil {
+		exists = sess.backend.Exists()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"machine":  s.cfg.Name,
+		"name":     s.cfg.Name,
+		"current":  s.currentName(),
+		"sessions": s.sessionNames(),
+		"exists":   exists,
+		"notify":   s.cfg.Notify,
+		"awaiting": awaiting,
 	})
 }
 
@@ -816,6 +841,7 @@ func (s *Server) Run() error {
 	if err := publishPort(port); err != nil {
 		log.Printf("[expose] could not publish the port (%v) — `cardputerme` in another project will start a second server instead of attaching", err)
 	}
+	go s.dispatch()
 	s.startBeacon(port)
 	s.armPowerTimer()
 	s.armIdleTimer()

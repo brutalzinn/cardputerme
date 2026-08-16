@@ -165,3 +165,59 @@ func TestRunRegistersTheCliSession(t *testing.T) {
 		t.Fatalf("current = %q, want the CLI's own session", got)
 	}
 }
+
+// The launcher probes /health to decide whether to attach, so it is reachable
+// on a machine whose last terminal just closed. It used to deref s.sess.
+func TestHealthWithNoSessionsDoesNotPanic(t *testing.T) {
+	_, srv := regServer(t)
+	res, err := http.Get(srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	var body map[string]any
+	if json.NewDecoder(res.Body).Decode(&body) != nil {
+		t.Fatal("health must stay valid json with no sessions")
+	}
+	if body["ok"] != true {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestHealthReportsTheMachineAndItsSessions(t *testing.T) {
+	s, srv := regServer(t)
+	s.register("gitme", "gitme", "/tmp")
+	res, _ := http.Get(srv.URL + "/health")
+	defer res.Body.Close()
+	var body struct {
+		Machine  string   `json:"machine"`
+		Current  string   `json:"current"`
+		Sessions []string `json:"sessions"`
+	}
+	json.NewDecoder(res.Body).Decode(&body)
+	if body.Machine != "machine" || body.Current != "gitme" || len(body.Sessions) != 1 {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestRestDeleteSession(t *testing.T) {
+	s, srv := regServer(t)
+	s.register("gitme", "gitme", "/tmp")
+	s.register("lara", "lara", "/tmp")
+
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/sessions?name=gitme", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	if got := s.sessionNames(); len(got) != 1 || got[0] != "lara" {
+		t.Fatalf("sessions = %v", got)
+	}
+}

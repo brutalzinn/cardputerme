@@ -50,6 +50,20 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 		s.registerHandler(w, r)
 		return
 	}
+	if r.Method == http.MethodDelete {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+			return
+		}
+		s.drop(name)
+		log.Printf("[sessions] released %q", name)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"current":  s.currentName(),
+			"sessions": s.sessionNames(),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"current":  s.currentName(),
 		"sessions": s.sessionNames(),
@@ -107,7 +121,10 @@ func (s *Server) register(name, target, cwd string) *session {
 	s.mu.Unlock()
 
 	sess.backend.EnsureSession(cwd)
-	sess.stop = sess.backend.Subscribe(func() { s.sessionChanged(name) }, func() { s.terminalGone(name) })
+	sess.stop = sess.backend.Subscribe(
+		func() { s.emit(sessionEvent{name: name, kind: evChanged}) },
+		func() { s.emit(sessionEvent{name: name, kind: evGone}) },
+	)
 	return sess
 }
 
@@ -125,12 +142,10 @@ func (s *Server) sessionChanged(name string) {
 // so this promotes a survivor rather than exiting.
 func (s *Server) drop(name string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.sessions[name]; !ok {
+	sess, ok := s.sessions[name]
+	if !ok {
+		s.mu.Unlock()
 		return
-	}
-	if stop := s.sessions[name].stop; stop != nil {
-		defer stop()
 	}
 	delete(s.sessions, name)
 	kept := s.order[:0]
@@ -140,12 +155,18 @@ func (s *Server) drop(name string) {
 		}
 	}
 	s.order = kept
-	if s.sess != nil && s.sess.name != name {
-		return
+	if s.sess == nil || s.sess.name == name {
+		s.sess = nil
+		if len(s.order) > 0 {
+			s.sess = s.sessions[s.order[0]]
+		}
 	}
-	s.sess = nil
-	if len(s.order) > 0 {
-		s.sess = s.sessions[s.order[0]]
+	s.mu.Unlock()
+
+	// OUTSIDE the lock, always: stop() waits for the subscribe goroutine, and
+	// that goroutine's callback takes mu — holding it here deadlocks the server.
+	if sess.stop != nil {
+		sess.stop()
 	}
 }
 

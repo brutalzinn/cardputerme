@@ -448,6 +448,8 @@ void sendReport(bool usb, int mv) {
   doc["usb"] = usb;
   doc["mv"] = mv;
   doc["battery"] = M5Cardputer.Power.getBatteryLevel();
+  doc["heap"] = (int)ESP.getFreeHeap();
+  doc["heapmin"] = (int)ESP.getMinFreeHeap();
   sendDoc(doc);
 }
 
