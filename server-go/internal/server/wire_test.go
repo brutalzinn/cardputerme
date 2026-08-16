@@ -29,7 +29,7 @@ func TestWireEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(s.wsHandler))
 	defer srv.Close()
 
-	stop := s.backend.Subscribe(s.schedulePush, func() {})
+	stop := s.sess.backend.Subscribe(s.schedulePush, func() {})
 	defer stop()
 
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
@@ -92,7 +92,7 @@ func TestAwaitingSyncsOnPrompt(t *testing.T) {
 	s.pushIfChanged(true)
 
 	s.mu.Lock()
-	awaiting := s.lastAwaiting
+	awaiting := s.sess.lastAwaiting
 	s.mu.Unlock()
 	if !awaiting {
 		t.Fatal("awaiting should be true after a menu is on screen")

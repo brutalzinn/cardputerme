@@ -98,7 +98,7 @@ func TestComposeMirrorFollowsBottom(t *testing.T) {
 
 func TestComposeMirrorShowsInputBuffer(t *testing.T) {
 	s := testServer()
-	s.input = "git status"
+	s.sess.input = "git status"
 	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", "", false)
 	last := st.lines[len(st.lines)-1]
 	if last.Text != "> git status" || last.Color != screen.Colors.Prompt {
@@ -154,8 +154,8 @@ func TestComposeMirrorCarriesSize(t *testing.T) {
 
 func TestComposeMirrorShowsGhostSuggestion(t *testing.T) {
 	s := testServer()
-	s.input = "git c"
-	s.history = []string{"git commit"}
+	s.sess.input = "git c"
+	s.sess.history = []string{"git commit"}
 	st := s.composeMirror([]screen.Line{{Text: "prev", Color: screen.Colors.Text}}, "", "", false)
 	last := st.lines[len(st.lines)-1]
 	if last.Text != "git commit" || last.Color != screen.Colors.Dim {

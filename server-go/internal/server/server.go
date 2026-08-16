@@ -77,33 +77,22 @@ type stateResult struct {
 	awaiting      bool
 }
 
-// Server owns the one exposed terminal, its render state (behind mu), and the
-// websocket hub. One Server per exposure.
+// Server owns the mirrored session(s), the device-facing state, and the
+// websocket hub. Everything under mu; per-terminal state lives in session.
 type Server struct {
 	cfg      Config
-	backend  *terminal.Backend
 	hub      *hub
 	upgrader websocket.Upgrader
 
-	mu           sync.Mutex
-	input        string
-	cmd          string
-	reply        string
-	hist         int
-	history      []string
-	view         screen.View
-	size         int
-	cache        *mirrorCache
-	lastSig      string
-	lastAwaiting bool
-	soundBase    string
-	lastLed      string
-	beacons      []beacon
-	picking      bool
-	pick         int
+	mu   sync.Mutex
+	sess *session
 
-	pushMu    sync.Mutex
-	pushTimer *time.Timer
+	size      int
+	soundBase string
+	lastLed   string
+	beacons   []beacon
+	picking   bool
+	pick      int
 
 	power         *power.Tracker
 	powerDeadline deadline
@@ -143,11 +132,9 @@ func sessionTarget(cfg Config) string {
 func New(cfg Config) *Server {
 	return &Server{
 		cfg:      cfg,
-		backend:  terminal.CreateBackend(sessionTarget(cfg), cfg.ScrollbackLines),
+		sess:     newSession(cfg.Name, terminal.CreateBackend(sessionTarget(cfg), cfg.ScrollbackLines)),
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
-		view:     screen.View{Follow: true, SelRow: -1},
-		hist:     -1,
 		size:     baseSize,
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
@@ -302,20 +289,20 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		selRow = findSelectorRow(grid)
 	}
-	if selRow >= 0 && selRow != s.view.SelRow {
-		s.view.Row = screen.AnchorRow(selRow, rows)
-		s.view.Follow = false
+	if selRow >= 0 && selRow != s.sess.view.SelRow {
+		s.sess.view.Row = screen.AnchorRow(selRow, rows)
+		s.sess.view.Follow = false
 	}
-	s.view.SelRow = selRow
-	if selRow < 0 && s.view.Follow {
-		s.view.Row = maxRow
+	s.sess.view.SelRow = selRow
+	if selRow < 0 && s.sess.view.Follow {
+		s.sess.view.Row = maxRow
 	}
-	s.view.Row = clamp(s.view.Row, 0, maxRow)
-	s.view.Col = clamp(s.view.Col, 0, maxCol)
-	if selRow < 0 && s.view.Row >= maxRow {
-		s.view.Follow = true
+	s.sess.view.Row = clamp(s.sess.view.Row, 0, maxRow)
+	s.sess.view.Col = clamp(s.sess.view.Col, 0, maxCol)
+	if selRow < 0 && s.sess.view.Row >= maxRow {
+		s.sess.view.Follow = true
 	}
-	lines := screen.WindowLines(grid, s.view, rows, cols)
+	lines := screen.WindowLines(grid, s.sess.view, rows, cols)
 
 	add := func(text string, color uint16) {
 		for _, line := range strings.Split(text, "\n") {
@@ -324,19 +311,19 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 			}
 		}
 	}
-	if s.reply != "" {
-		add(s.reply, screen.Colors.Status)
+	if s.sess.reply != "" {
+		add(s.sess.reply, screen.Colors.Status)
 	}
-	if s.cmd != "" {
-		add(s.cmd, screen.Colors.Prompt)
+	if s.sess.cmd != "" {
+		add(s.sess.cmd, screen.Colors.Prompt)
 	}
-	if len(s.input) > 0 {
-		composed := screen.WrapLine("> "+strings.ReplaceAll(s.input, "\n", " | "), cols)
+	if len(s.sess.input) > 0 {
+		composed := screen.WrapLine("> "+strings.ReplaceAll(s.sess.input, "\n", " | "), cols)
 		from := max(0, len(composed)-2)
 		for _, piece := range composed[from:] {
 			lines = append(lines, screen.Line{Text: piece, Color: screen.Colors.Prompt})
 		}
-		if g := input.Suggest(s.input, s.history); g != "" {
+		if g := input.Suggest(s.sess.input, s.sess.history); g != "" {
 			ghost := []rune(g)
 			if len(ghost) > cols {
 				ghost = ghost[:cols]
@@ -355,7 +342,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 			segs = append(segs, seg)
 		}
 	}
-	segs = append(segs, fmt.Sprintf("r%d/%d c%d z%d", s.view.Row, maxRow, s.view.Col, s.size))
+	segs = append(segs, fmt.Sprintf("r%d/%d c%d z%d", s.sess.view.Row, maxRow, s.sess.view.Col, s.size))
 	bar := strings.Join(segs, "  ")
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
@@ -375,7 +362,7 @@ func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	// grid + status row), not the raw tail — a menu with blank lines below it
 	// would otherwise fall outside the last-N raw rows and be missed.
 	awaiting := detectPromptAwaiting(gridTail(grid, status))
-	s.cache = &mirrorCache{grid: grid, status: status, title: title, awaiting: awaiting}
+	s.sess.cache = &mirrorCache{grid: grid, status: status, title: title, awaiting: awaiting}
 	return s.composeMirror(grid, status, title, awaiting)
 }
 
@@ -401,20 +388,20 @@ func sig(st stateResult) string {
 }
 
 func (s *Server) pushIfChanged(force bool) {
-	pane, ok := s.backend.Capture() // read-only subprocess — kept OUT of the lock
+	pane, ok := s.sess.backend.Capture() // read-only subprocess — kept OUT of the lock
 	s.mu.Lock()
 	st := s.stateFrom(pane, ok)
 	sg := sig(st)
-	changed := sg != s.lastSig || force
+	changed := sg != s.sess.lastSig || force
 	if changed {
-		s.lastSig = sg
+		s.sess.lastSig = sg
 	}
-	freshQuestion := st.awaiting && !s.lastAwaiting
-	awaitingChanged := st.awaiting != s.lastAwaiting
-	if !st.awaiting && s.lastAwaiting {
-		s.view.Follow = true
+	freshQuestion := st.awaiting && !s.sess.lastAwaiting
+	awaitingChanged := st.awaiting != s.sess.lastAwaiting
+	if !st.awaiting && s.sess.lastAwaiting {
+		s.sess.view.Follow = true
 	}
-	s.lastAwaiting = st.awaiting
+	s.sess.lastAwaiting = st.awaiting
 	msg := displayMessage(st)
 	s.mu.Unlock()
 
@@ -465,15 +452,15 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.setLed(ledOff)
 	s.mu.Lock()
-	s.reply = ""
+	s.sess.reply = ""
 	res := input.InterpretKey(
-		input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd, Picking: s.picking, Pick: s.pick},
+		input.State{Input: s.sess.input, Hist: s.sess.hist, Cmd: s.sess.cmd, Picking: s.picking, Pick: s.pick},
 		key,
-		input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history, Beacons: len(s.beacons)},
+		input.KeyCtx{Awaiting: s.sess.lastAwaiting, History: s.sess.history, Beacons: len(s.beacons)},
 	)
-	s.input = res.State.Input
-	s.cmd = res.State.Cmd
-	s.hist = res.State.Hist
+	s.sess.input = res.State.Input
+	s.sess.cmd = res.State.Cmd
+	s.sess.hist = res.State.Hist
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
 	a := res.Action
@@ -481,7 +468,7 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	switch a.Kind {
 	case "pan":
 		for i := 0; i < times; i++ {
-			s.view = screen.PanViewport(s.view, a.Key)
+			s.sess.view = screen.PanViewport(s.sess.view, a.Key)
 		}
 	case "zoom":
 		switch a.Key {
@@ -493,21 +480,21 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 			s.size = baseSize
 		}
 	case "send":
-		s.history = append(s.history, a.Text)
-		if len(s.history) > historyMax {
-			s.history = s.history[1:]
+		s.sess.history = append(s.sess.history, a.Text)
+		if len(s.sess.history) > historyMax {
+			s.sess.history = s.sess.history[1:]
 		}
-		s.view.Follow = true
+		s.sess.view.Follow = true
 	case "pressKey":
-		s.view.Follow = true
+		s.sess.view.Follow = true
 	case "command":
-		s.reply = commands.Run(commands.Ctx{Name: s.cfg.Name}, a.Text)
+		s.sess.reply = commands.Run(commands.Ctx{Name: s.cfg.Name}, a.Text)
 	}
 	var echo string
-	if s.cache != nil {
-		st := s.composeMirror(s.cache.grid, s.cache.status, s.cache.title, s.cache.awaiting)
-		if sg := sig(st); sg != s.lastSig {
-			s.lastSig = sg
+	if s.sess.cache != nil {
+		st := s.composeMirror(s.sess.cache.grid, s.sess.cache.status, s.sess.cache.title, s.sess.cache.awaiting)
+		if sg := sig(st); sg != s.sess.lastSig {
+			s.sess.lastSig = sg
 			echo = displayMessage(st)
 		}
 	}
@@ -520,9 +507,9 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 
 	switch a.Kind {
 	case "send":
-		s.backend.SendText(a.Text)
+		s.sess.backend.SendText(a.Text)
 	case "pressKey":
-		s.backend.SendKeyTimes(a.Key, times)
+		s.sess.backend.SendKeyTimes(a.Key, times)
 	}
 	if echo != "" {
 		s.hub.broadcastFrame(echo)
@@ -666,9 +653,9 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
-	exists := s.backend.Exists()
+	exists := s.sess.backend.Exists()
 	s.mu.Lock()
-	awaiting := s.lastAwaiting
+	awaiting := s.sess.lastAwaiting
 	s.mu.Unlock()
 	json.NewEncoder(w).Encode(map[string]any{
 		"ok": true, "name": s.cfg.Name, "exists": exists, "notify": s.cfg.Notify, "awaiting": awaiting,
@@ -683,15 +670,15 @@ func (s *Server) pushAfter() time.Duration {
 }
 
 func (s *Server) schedulePush() {
-	s.pushMu.Lock()
-	defer s.pushMu.Unlock()
-	if s.pushTimer != nil {
+	s.sess.pushMu.Lock()
+	defer s.sess.pushMu.Unlock()
+	if s.sess.pushTimer != nil {
 		return
 	}
-	s.pushTimer = time.AfterFunc(s.pushAfter(), func() {
-		s.pushMu.Lock()
-		s.pushTimer = nil
-		s.pushMu.Unlock()
+	s.sess.pushTimer = time.AfterFunc(s.pushAfter(), func() {
+		s.sess.pushMu.Lock()
+		s.sess.pushTimer = nil
+		s.sess.pushMu.Unlock()
 		s.pushIfChanged(false)
 	})
 }
@@ -762,7 +749,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("no free port between %d and %d", portStart, portStart+portTries-1)
 	}
 	target := sessionTarget(s.cfg)
-	created, ok := s.backend.EnsureSession(s.cfg.SessionCwd)
+	created, ok := s.sess.backend.EnsureSession(s.cfg.SessionCwd)
 	if !ok {
 		return fmt.Errorf("could not attach to or create terminal '%s'", target)
 	}
@@ -782,7 +769,7 @@ func (s *Server) Run() error {
 	s.armPowerTimer()
 	s.armIdleTimer()
 
-	stop := s.backend.Subscribe(s.schedulePush, func() {
+	stop := s.sess.backend.Subscribe(s.schedulePush, func() {
 		log.Printf("[expose] terminal '%s' is gone — shutting down", s.cfg.Name)
 		os.Exit(0)
 	})

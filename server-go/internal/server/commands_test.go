@@ -12,11 +12,11 @@ func TestTypingPingEndToEndShowsPong(t *testing.T) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.reply != "Pong!" {
-		t.Fatalf("got %q", s.reply)
+	if s.sess.reply != "Pong!" {
+		t.Fatalf("got %q", s.sess.reply)
 	}
-	if s.input != "" {
-		t.Fatalf("a command must never land in the terminal buffer, got %q", s.input)
+	if s.sess.input != "" {
+		t.Fatalf("a command must never land in the terminal buffer, got %q", s.sess.input)
 	}
 }
 
@@ -80,8 +80,8 @@ func TestTheNoticeClearsOnTheNextKey(t *testing.T) {
 	s.applyKey("x")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.reply != "" {
-		t.Fatalf("a reply must not pin itself to the status bar, got %q", s.reply)
+	if s.sess.reply != "" {
+		t.Fatalf("a reply must not pin itself to the status bar, got %q", s.sess.reply)
 	}
 }
 

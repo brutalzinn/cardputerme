@@ -46,8 +46,8 @@ func TestAKeyOnADarkScreenOnlyWakesIt(t *testing.T) {
 	s.keyDown("a", time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.input != "" {
-		t.Fatalf("a keypress on a dark screen must be swallowed, got %q", s.input)
+	if s.sess.input != "" {
+		t.Fatalf("a keypress on a dark screen must be swallowed, got %q", s.sess.input)
 	}
 	if got := s.power.State(); got != power.On {
 		t.Fatalf("it must still wake the screen, got %q", got)
@@ -61,8 +61,8 @@ func TestTheNextKeyAfterWakingIsTyped(t *testing.T) {
 	s.keyDown("b", time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.input != "b" {
-		t.Fatalf("got %q", s.input)
+	if s.sess.input != "b" {
+		t.Fatalf("got %q", s.sess.input)
 	}
 }
 
@@ -74,8 +74,8 @@ func TestADimScreenStillTakesTheKey(t *testing.T) {
 	s.keyDown("a", time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.input != "a" {
-		t.Fatalf("a dim screen is readable, so the key must go through, got %q", s.input)
+	if s.sess.input != "a" {
+		t.Fatalf("a dim screen is readable, so the key must go through, got %q", s.sess.input)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestABatchAppliesEveryEventInOrder(t *testing.T) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.input != "hi" {
-		t.Fatalf("got %q", s.input)
+	if s.sess.input != "hi" {
+		t.Fatalf("got %q", s.sess.input)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestAMissingStateIsATap(t *testing.T) {
 	s.handleKeyEvent("a", "", time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.input != "a" {
-		t.Fatalf("old firmware sends no state and must still type, got %q", s.input)
+	if s.sess.input != "a" {
+		t.Fatalf("old firmware sends no state and must still type, got %q", s.sess.input)
 	}
 }
