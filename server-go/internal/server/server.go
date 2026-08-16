@@ -113,6 +113,9 @@ type Server struct {
 
 	repeat         *repeat.Holder
 	repeatDeadline deadline
+
+	// onNotify lets a test observe which session raised the alert.
+	onNotify func(session string)
 }
 
 const (

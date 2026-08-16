@@ -30,6 +30,7 @@ type session struct {
 	lastSig      string
 	lastAwaiting bool
 	stop         func()
+	check        deadline
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
@@ -129,16 +130,6 @@ func (s *Server) register(name, target, cwd string) *session {
 		func() { s.emit(sessionEvent{name: name, kind: evGone}) },
 	)
 	return sess
-}
-
-// sessionChanged pushes only when the CHANGED session is the one being viewed.
-// Without this every session's output re-pushed the current session's frame,
-// so unrelated projects made the mirror lag.
-func (s *Server) sessionChanged(name string) {
-	if s.currentName() != name {
-		return
-	}
-	s.schedulePush()
 }
 
 // drop removes a session. A dying terminal must never take the others with it,
