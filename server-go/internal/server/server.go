@@ -51,6 +51,7 @@ type Config struct {
 	RepeatDelay     time.Duration
 	RepeatInterval  time.Duration
 	PushDebounce    time.Duration
+	UsbMilliVolts   int
 }
 
 type mirrorCache struct {
@@ -400,6 +401,17 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	return a
 }
 
+func onExternalPower(usb bool, milliVolts, threshold int) bool {
+	if usb {
+		return true
+	}
+	return threshold > 0 && milliVolts >= threshold
+}
+
+func (s *Server) handleReport(usb bool, milliVolts int, now time.Time) {
+	s.applyPower(s.power.SetExternalPower(now, onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)))
+}
+
 func (s *Server) handleKeyEvent(key, state string, now time.Time) {
 	if state == "up" {
 		s.keyUp(key)
@@ -473,6 +485,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			Key    string `json:"key"`
 			Text   string `json:"text"`
 			State  string `json:"state"`
+			Usb    bool   `json:"usb"`
+			Mv     int    `json:"mv"`
 			Events []struct {
 				Key   string `json:"key"`
 				State string `json:"state"`
@@ -482,6 +496,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch m.Type {
+		case "report":
+			s.handleReport(m.Usb, m.Mv, time.Now())
 		case "wake":
 			s.applyPower(s.power.Wake(time.Now()))
 		case "sleep":

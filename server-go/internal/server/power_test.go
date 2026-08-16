@@ -10,7 +10,7 @@ import (
 func sleepyServer() *Server {
 	return New(Config{
 		Name: "test", WrapCols: 20, LinesPerCard: 7, ScrollbackLines: 200, MaxCards: 40, Notify: true,
-		DimAfter: 30 * time.Second, OffAfter: 120 * time.Second,
+		DimAfter: 30 * time.Second, OffAfter: 120 * time.Second, UsbMilliVolts: 4200,
 	})
 }
 

@@ -354,10 +354,41 @@ void sendDoc(JsonDocument& doc) {
   webSocket.sendTXT(body);
 }
 
+int g_lastMv = -1;
+int g_lastUsb = -1;
+unsigned long g_supplyTick = 0;
+
 void sendEvent(const char* type) {
   JsonDocument doc;
   doc["type"] = type;
   sendDoc(doc);
+}
+
+void sendReport(bool usb, int mv) {
+  if (!wsConnected) return;
+  JsonDocument doc;
+  doc["type"] = "report";
+  doc["usb"] = usb;
+  doc["mv"] = mv;
+  doc["battery"] = M5Cardputer.Power.getBatteryLevel();
+  sendDoc(doc);
+}
+
+void reportSupply(bool force) {
+  bool usb = (bool)Serial;
+  int mv = M5Cardputer.Power.getBatteryVoltage();
+  bool changed = force || (int)usb != g_lastUsb || abs(mv - g_lastMv) >= 40;
+  if (!changed) return;
+  g_lastUsb = (int)usb;
+  g_lastMv = mv;
+  sendReport(usb, mv);
+}
+
+void tickSupply() {
+  unsigned long now = millis();
+  if (now - g_supplyTick < 5000) return;
+  g_supplyTick = now;
+  reportSupply(false);
 }
 
 uint8_t brightnessFor(PowerState p) {
@@ -398,6 +429,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       wsConnected = true;
       showToast("Connected");
       redraw();
+      reportSupply(true);
       break;
     case WStype_DISCONNECTED:
       wsConnected = false;
@@ -541,6 +573,8 @@ void loop() {
   }
   if (g_haveTarget && g_listDirty) g_listDirty = false;
   if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
+
+  if (g_haveTarget && wsConnected) tickSupply();
 
   if (M5Cardputer.BtnA.wasPressed()) togglePower();
 
