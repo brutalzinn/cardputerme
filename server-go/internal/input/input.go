@@ -5,10 +5,11 @@ import "strings"
 type State struct {
 	Input string
 	Hist  int // -1 = none
+	Cmd   string
 }
 
 type Action struct {
-	Kind   string // none | send | pressKey | pan
+	Kind   string
 	Key    string
 	Text   string
 	Repeat bool // safe to fire again while the key is held
@@ -36,6 +37,8 @@ func isDigits(text string) bool {
 	return true
 }
 
+const CommandPrefix = ";"
+
 var arrows = map[string]bool{"up": true, "down": true, "left": true, "right": true}
 
 // suggest returns the newest history entry that extends the current input, or
@@ -60,7 +63,29 @@ func splitMod(k string) (mod, base string) {
 	return k[:i], k[i+1:]
 }
 
+func commandKey(state State, key string) Result {
+	typing := func(cmd string) Result {
+		return Result{State{Input: state.Input, Hist: state.Hist, Cmd: cmd}, Action{Kind: "none"}}
+	}
+	if key == "esc" {
+		return typing("")
+	}
+	if key == "enter" {
+		return Result{State{Input: state.Input, Hist: state.Hist}, Action{Kind: "command", Text: state.Cmd}}
+	}
+	if key == "backspace" {
+		return typing(state.Cmd[:len(state.Cmd)-1])
+	}
+	if len(key) == 1 {
+		return typing(state.Cmd + key)
+	}
+	return typing(state.Cmd)
+}
+
 func InterpretKey(state State, key string, ctx KeyCtx) Result {
+	if state.Cmd != "" {
+		return commandKey(state, key)
+	}
 	input := state.Input
 	hist := state.Hist
 	mirror := func(newInput string, newHist int) State { return State{Input: newInput, Hist: newHist} }
@@ -150,6 +175,9 @@ func InterpretKey(state State, key string, ctx KeyCtx) Result {
 		return Result{state, Action{Kind: "pan", Key: key, Repeat: true}}
 	}
 	if len(key) == 1 {
+		if input == "" && key == CommandPrefix {
+			return quiet(State{Input: input, Hist: hist, Cmd: CommandPrefix})
+		}
 		if ctx.Awaiting && input == "" && isDigits(key) {
 			return press(state, key)
 		}

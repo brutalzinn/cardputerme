@@ -81,6 +81,8 @@ type Server struct {
 
 	mu           sync.Mutex
 	input        string
+	cmd          string
+	notice       string
 	hist         int
 	history      []string
 	view         screen.View
@@ -277,6 +279,11 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	}
 	lines := screen.WindowLines(grid, s.view, rows, cols)
 
+	if s.cmd != "" {
+		for _, piece := range screen.WrapLine(s.cmd, cols) {
+			lines = append(lines, screen.Line{Text: piece, Color: screen.Colors.Prompt})
+		}
+	}
 	if len(s.input) > 0 {
 		composed := screen.WrapLine("> "+strings.ReplaceAll(s.input, "\n", " | "), cols)
 		from := max(0, len(composed)-2)
@@ -295,14 +302,18 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	bar := fmt.Sprintf("%s  r%d/%d c%d z%d", hint, s.view.Row, maxRow, s.view.Col, s.size)
-	if title != "" {
-		bar = title + "  " + bar
+	segs := []string{"[" + s.cfg.Name + "]"}
+	for _, seg := range []string{s.notice, title, hint} {
+		if seg != "" {
+			segs = append(segs, seg)
+		}
 	}
+	segs = append(segs, fmt.Sprintf("r%d/%d c%d z%d", s.view.Row, maxRow, s.view.Col, s.size))
+	bar := strings.Join(segs, "  ")
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: "[" + s.cfg.Name + "] " + bar, size: s.size, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: bar, size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;
@@ -395,8 +406,10 @@ func (s *Server) applyKey(key string) input.Action {
 func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
 	s.mu.Lock()
-	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
+	s.notice = ""
+	res := input.InterpretKey(input.State{Input: s.input, Hist: s.hist, Cmd: s.cmd}, key, input.KeyCtx{Awaiting: s.lastAwaiting, History: s.history})
 	s.input = res.State.Input
+	s.cmd = res.State.Cmd
 	s.hist = res.State.Hist
 	a := res.Action
 	switch a.Kind {
@@ -421,6 +434,8 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		s.view.Follow = true
 	case "pressKey":
 		s.view.Follow = true
+	case "command":
+		s.notice = runCommand(s, a.Text)
 	}
 	var echo string
 	if s.cache != nil {
