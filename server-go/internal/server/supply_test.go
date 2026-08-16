@@ -36,7 +36,7 @@ func TestTheThresholdIsTheServersToChoose(t *testing.T) {
 
 func TestAReportOnUsbStopsTheScreenSleeping(t *testing.T) {
 	s := sleepyServer()
-	s.handleReport(true, 4300, time.Now())
+	s.handleReport(true, 4300, 0, time.Now())
 	if got := s.power.Until(time.Now()); got != 0 {
 		t.Fatalf("no rung should be armed while on USB, got %v", got)
 	}
@@ -45,8 +45,8 @@ func TestAReportOnUsbStopsTheScreenSleeping(t *testing.T) {
 func TestUnpluggingLetsItSleepAgain(t *testing.T) {
 	s := sleepyServer()
 	now := time.Now()
-	s.handleReport(true, 4300, now)
-	s.handleReport(false, 3800, now)
+	s.handleReport(true, 4300, 0, now)
+	s.handleReport(false, 3800, 0, now)
 	if got := s.power.Until(now); got <= 0 {
 		t.Fatalf("the ladder must re-arm once unplugged, got %v", got)
 	}

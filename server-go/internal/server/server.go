@@ -95,6 +95,11 @@ type Server struct {
 	size      int
 	wifi      bool
 	alert     string
+
+	deviceKnown  bool
+	deviceHeader bool
+	lastMv       int
+	devicePct    int
 	notify    bool
 	soundBase string
 	lastNoSig string
@@ -389,14 +394,11 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	segs := []string{"[" + s.cfg.Name + "]"}
-	for _, seg := range []string{title, hint} {
-		if seg != "" {
-			segs = append(segs, seg)
-		}
-	}
-	segs = append(segs, fmt.Sprintf("r%d/%d c%d z%d", s.sess.view.Row, maxRow, s.sess.view.Col, s.size))
-	bar := strings.Join(segs, "  ")
+	// The battery rides the status bar as well as the header: the header is the
+	// newer, nicer home, but this line is the one EVERY firmware renders, so a
+	// value the user has to be able to trust must not depend on which build is
+	// on the device.
+	bar := statusBar(s.batteryLabelLocked(), s.cfg.Name, title, hint, s.sess.view.Row, maxRow, s.sess.view.Col, s.size)
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
@@ -634,7 +636,11 @@ func onExternalPower(usb bool, milliVolts, threshold int) bool {
 	return threshold > 0 && milliVolts >= threshold
 }
 
-func (s *Server) handleReport(usb bool, milliVolts int, now time.Time) {
+func (s *Server) handleReport(usb bool, milliVolts, devicePct int, now time.Time) {
+	s.mu.Lock()
+	s.lastMv = milliVolts
+	s.devicePct = devicePct
+	s.mu.Unlock()
 	wired := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
 	s.gauge.Observe(battery.Reading{Millivolts: milliVolts, External: wired, At: now})
 	pct, known, external := s.gauge.Status()
@@ -724,6 +730,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			State   string   `json:"state"`
 			Usb     bool     `json:"usb"`
 			Wifi    *bool    `json:"wifi"`
+			Battery int      `json:"battery"`
 			Mv      int      `json:"mv"`
 			Heap    int      `json:"heap"`
 			HeapMin int      `json:"heapmin"`
@@ -740,7 +747,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		case "report":
 			log.Printf("[device] heap=%d minheap=%d", m.Heap, m.HeapMin)
 			s.applyWifi(m.Wifi)
-			s.handleReport(m.Usb, m.Mv, time.Now())
+			s.handleReport(m.Usb, m.Mv, m.Battery, time.Now())
 		case "beacons":
 			s.handleBeacons(m.List)
 		case "wake":
@@ -777,6 +784,11 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	if sess != nil {
 		exists = sess.backend.Exists()
 	}
+	pct, known, external := s.gauge.Status()
+	s.mu.Lock()
+	mv, devicePct := s.lastMv, s.devicePct
+	s.mu.Unlock()
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"machine":  s.cfg.Name,
@@ -786,6 +798,14 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 		"exists":   exists,
 		"notify":   s.NotifyEnabled(),
 		"awaiting": awaiting,
+		// Everything below exists so a blank or wrong device screen can be
+		// diagnosed from here rather than by asking the user what they see.
+		"battery":        battery.Label(pct, known, external),
+		"mv":             mv,
+		"external":       external,
+		"clients":        s.hub.count(),
+		"renders_header": s.deviceRendersHeader(),
+		"device_battery": devicePct,
 	})
 }
 

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"log"
+
 	"cardputerme/internal/battery"
 	"cardputerme/internal/screen"
 )
@@ -10,13 +12,42 @@ const unknownBattery = "--%"
 
 // applyWifi takes the fact the device reported. Absent means the firmware
 // predates the field, not that the radio is down.
+//
+// Its PRESENCE is also a free firmware probe: `wifi` arrived in the same build
+// that started drawing server-composed header cells, so a device that reports it
+// is a device that renders the header. Without this we cannot tell a blank top
+// bar caused by old firmware from one caused by a stale server, and asking the
+// user what they see is not a diagnosis.
 func (s *Server) applyWifi(up *bool) {
+	s.noteHeaderCapable(up != nil)
 	if up == nil {
 		return
 	}
 	s.mu.Lock()
 	s.wifi = *up
 	s.mu.Unlock()
+}
+
+func (s *Server) noteHeaderCapable(capable bool) {
+	s.mu.Lock()
+	known, was := s.deviceKnown, s.deviceHeader
+	s.deviceKnown = true
+	s.deviceHeader = capable
+	s.mu.Unlock()
+	if known && was == capable {
+		return
+	}
+	if capable {
+		log.Printf("[device] firmware renders server-composed headers")
+		return
+	}
+	log.Printf("[device] firmware PREDATES the composed header — the top bar is drawn on-device and cannot be changed from here; re-flash to fix")
+}
+
+func (s *Server) deviceRendersHeader() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deviceKnown && s.deviceHeader
 }
 
 func wifiCell(up bool) screen.Cell {
@@ -42,6 +73,15 @@ func (s *Server) headerCellsLocked() []screen.Cell {
 	}
 	cells = append(cells, wifiCell(s.wifi))
 	return append(cells, batteryCell(battery.Label(s.gauge.Status())))
+}
+
+// batteryLabelLocked is the one place the placeholder decision lives, so the
+// header and the status bar can never disagree about what "unknown" looks like.
+func (s *Server) batteryLabelLocked() string {
+	if label := battery.Label(s.gauge.Status()); label != "" {
+		return label
+	}
+	return unknownBattery
 }
 
 // batteryCell always occupies the slot: a reading that appears and disappears
