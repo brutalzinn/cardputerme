@@ -42,7 +42,9 @@ func TestAnyProgramCanRaiseAnAlert(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status = %d", code)
 	}
-	if body["delivered"] != true {
+	// No websocket client in this test, so `delivered` is honestly false — the
+	// alert is queued and will reach the device when one connects.
+	if body["queued"] != true {
 		t.Fatalf("body = %v", body)
 	}
 	if got := headerText(s.headerCells()); !strings.Contains(got, "stuck on tests") {
@@ -65,7 +67,7 @@ func TestAlertNamesTheSessionThatWantsYou(t *testing.T) {
 func TestAlertWithoutTextStillAlerts(t *testing.T) {
 	s, srv := alertServer(t)
 	_, body := postNotify(t, srv.URL, `{}`)
-	if body["delivered"] != true {
+	if body["queued"] != true {
 		t.Fatalf("body = %v", body)
 	}
 	if got := headerText(s.headerCells()); !strings.Contains(got, defaultAlert) {
@@ -74,7 +76,9 @@ func TestAlertWithoutTextStillAlerts(t *testing.T) {
 }
 
 // `;notify 0` is ONE switch over every channel (#40). An API that could shout
-// past it would make the switch a lie.
+// past it would make the switch a lie. It silences the NOISE only — the alert is
+// still queued, because silencing a pager must not destroy the record of who
+// wanted you.
 func TestNotifyOffSilencesTheApi(t *testing.T) {
 	s, srv := alertServer(t)
 	s.SetNotify(false)
@@ -85,11 +89,14 @@ func TestNotifyOffSilencesTheApi(t *testing.T) {
 	if body["delivered"] != false {
 		t.Fatalf("the caller must be told it was silenced, body = %v", body)
 	}
-	if got := headerText(s.headerCells()); strings.Contains(got, "stuck on tests") {
-		t.Fatalf("header = %q", got)
+	if body["reason"] != "silenced by ;notify 0" {
+		t.Fatalf("the caller must be told WHY, body = %v", body)
 	}
 	if s.lastLed == ledMessage(ledAttention) {
 		t.Fatal("silence means the LED too")
+	}
+	if s.waiting() != 1 {
+		t.Fatal("silenced is not discarded")
 	}
 }
 

@@ -58,6 +58,10 @@ func (s *Server) switchTo(name string) {
 	s.mu.Unlock()
 	if ok {
 		log.Printf("[picker] viewing session %q", name)
+		// Arriving at a session IS the answer to it. Leaving its alert up would
+		// nag about the thing you are already looking at, while the projects you
+		// have NOT looked at stay queued.
+		s.clearSession(name)
 		s.pushIfChanged(true)
 	}
 }

@@ -68,8 +68,8 @@ func (s *Server) headerCells() []screen.Cell {
 // here, so it can change without a re-flash (#45).
 func (s *Server) headerCellsLocked() []screen.Cell {
 	cells := []screen.Cell{}
-	if s.alert != "" {
-		cells = append(cells, screen.Cell{Text: s.alert + " ", Color: screen.Colors.Ask})
+	if text := s.alertTextLocked(); text != "" {
+		cells = append(cells, screen.Cell{Text: text + " ", Color: screen.Colors.Ask})
 	}
 	cells = append(cells, wifiCell(s.wifi))
 	return append(cells, batteryCell(battery.Label(s.gauge.Status())))

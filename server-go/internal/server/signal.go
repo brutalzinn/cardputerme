@@ -132,7 +132,9 @@ func (s *Server) dismissAlert() {
 		s.hub.broadcast(soundStopMessage())
 	}
 	s.setLed(ledOff)
-	s.clearAlert()
+	// A keypress means "I am here", not "I have dealt with every project": it
+	// answers the session on screen and leaves the others waiting.
+	s.clearSession(s.currentName())
 }
 
 func (s *Server) signalAttention() {

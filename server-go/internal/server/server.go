@@ -92,21 +92,21 @@ type Server struct {
 	sessions map[string]*session
 	order    []string
 
-	size      int
-	wifi      bool
-	alert     string
+	size   int
+	wifi   bool
+	alerts []alert
 
 	deviceKnown  bool
 	deviceHeader bool
 	lastMv       int
 	devicePct    int
-	notify    bool
-	soundBase string
-	lastNoSig string
-	lastLed   string
-	beacons   []beacon
-	picking   bool
-	pick      int
+	notify       bool
+	soundBase    string
+	lastNoSig    string
+	lastLed      string
+	beacons      []beacon
+	picking      bool
+	pick         int
 
 	events    chan sessionEvent
 	done      chan struct{}

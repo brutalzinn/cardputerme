@@ -36,7 +36,14 @@ curl -sS -X POST "http://127.0.0.1:$port/notify" \
   -d '{"session":"'"$(basename "$PWD")"'","text":"tests still running after 5m"}'
 ```
 
-The reply is `{"delivered":true|false}`. **`delivered:false` is not an error** — it means the user ran `;notify 0` on the device and asked for silence. Report that plainly and do not retry or route around it.
+The reply is `{"delivered":…,"queued":true,"waiting":N,"clients":N,"reason":"…"}`.
+
+**`delivered:false` is not an error, and the alert is never lost** — `queued` is always true, and it will reach the device as soon as one is looking. Read `reason` to know why it did not go out now:
+
+- `silenced by ;notify 0` — the user asked for silence. Respect it; do not retry or route around it.
+- `no device connected` — nothing is listening yet. The alert is waiting in the inbox.
+
+`waiting` is how many alerts are still unanswered. If it is climbing, you are paging too often — stop.
 
 **When to notify — the bar is "the user would want to be interrupted":**
 
