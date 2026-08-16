@@ -32,6 +32,8 @@ const unsigned long BEACON_TTL_MS = 6500;
 #define RGB_LED_PIN   21
 #define LED_PULSE_MS  600
 #define WAV_MAX_BYTES 200000
+#define BAT_SAMPLES        8
+#define BAT_HYSTERESIS_MV  80
 
 #define COL_BG      0x0000
 #define COL_HDR     0x10A2
@@ -128,14 +130,10 @@ void drawHeader() {
     d.print(toast);
   }
 
-  int batt = M5Cardputer.Power.getBatteryLevel();
   String pos = String(g_lines.empty() ? 0 : g_page + 1) + "/" + String(pageCount());
-  String tail = String(batt) + "% " + pos;
-  d.setCursor(SCR_W - (int)tail.length() * 6 - 3, 4);
-  d.setTextColor(batt > 20 ? COL_OK : COL_WARN, COL_HDR);
-  d.print(String(batt) + "%");
+  d.setCursor(SCR_W - (int)pos.length() * 6 - 3, 4);
   d.setTextColor(COL_TEXT, COL_HDR);
-  d.print(" " + pos);
+  d.print(pos);
 }
 
 void drawScrollbar() {
@@ -372,18 +370,36 @@ bool loadWav(const char* url, size_t& outLen) {
   return got == len;
 }
 
+String g_wavUrl = "";
+size_t g_wavLen = 0;
+String g_pendingSound = "";
+
+void playPending() {
+  if (g_pendingSound.length() == 0) return;
+  String url = g_pendingSound;
+  g_pendingSound = "";
+
+  if (url == g_wavUrl && g_wavLen > 0) {
+    M5Cardputer.Speaker.playWav(g_wav, g_wavLen);
+    return;
+  }
+  size_t len = 0;
+  if (loadWav(url.c_str(), len)) {
+    g_wavUrl = url;
+    g_wavLen = len;
+    M5Cardputer.Speaker.playWav(g_wav, len);
+    return;
+  }
+  M5Cardputer.Speaker.tone(1200, 90);
+}
+
 void applySound(JsonDocument& doc) {
   const char* url = doc["url"] | "";
   if (strlen(url) == 0) {
     M5Cardputer.Speaker.tone(doc["freq"] | 1200, doc["ms"] | 90);
     return;
   }
-  size_t len = 0;
-  if (loadWav(url, len)) {
-    M5Cardputer.Speaker.playWav(g_wav, len);
-    return;
-  }
-  M5Cardputer.Speaker.tone(1200, 90);
+  g_pendingSound = String(url);
 }
 
 void applyDisplay(JsonDocument& doc) {
@@ -453,10 +469,16 @@ void sendReport(bool usb, int mv) {
   sendDoc(doc);
 }
 
+int sampleMilliVolts() {
+  long total = 0;
+  for (int i = 0; i < BAT_SAMPLES; i++) total += M5Cardputer.Power.getBatteryVoltage();
+  return (int)(total / BAT_SAMPLES);
+}
+
 void reportSupply(bool force) {
   bool usb = HWCDC::isPlugged();
-  int mv = M5Cardputer.Power.getBatteryVoltage();
-  bool changed = force || (int)usb != g_lastUsb || abs(mv - g_lastMv) >= 40;
+  int mv = sampleMilliVolts();
+  bool changed = force || (int)usb != g_lastUsb || abs(mv - g_lastMv) >= BAT_HYSTERESIS_MV;
   if (!changed) return;
   g_lastUsb = (int)usb;
   g_lastMv = mv;
@@ -659,6 +681,7 @@ void loop() {
 
   if (g_haveTarget && wsConnected) tickSupply();
   tickLed();
+  playPending();
 
   if (M5Cardputer.BtnA.wasPressed()) togglePower();
 
