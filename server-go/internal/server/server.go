@@ -89,6 +89,7 @@ type Server struct {
 	order    []string
 
 	size      int
+	notify    bool
 	soundBase string
 	lastNoSig string
 	lastLed   string
@@ -150,6 +151,7 @@ func New(cfg Config) *Server {
 		hub:      newHub(),
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		size:     baseSize,
+		notify:   cfg.Notify,
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
 		gauge:    battery.NewGauge(batteryPolicy),
@@ -449,7 +451,7 @@ func (s *Server) pushIfChanged(force bool) {
 	if changed {
 		s.hub.broadcastFrame(msg)
 	}
-	if s.cfg.Notify && freshQuestion {
+	if s.notify && freshQuestion {
 		s.hub.broadcast(`{"type":"notify","reason":"question"}`)
 		s.signalAttention()
 	}
@@ -558,8 +560,6 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		s.sess.view.Follow = true
 	case "pressKey":
 		s.sess.view.Follow = true
-	case "command":
-		s.sess.reply = commands.Run(commands.Ctx{Name: s.cfg.Name}, a.Text)
 	}
 	var echo string
 	if s.sess.cache != nil {
@@ -577,6 +577,22 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	}
 	if switchTo != "" {
 		s.switchTo(switchTo)
+	}
+	// Commands run with NO lock held: a command may call back into the server
+	// (`;notify` flips live state), and a Go mutex is not reentrant — running
+	// this inside the lock deadlocked the whole server and froze the device.
+	if a.Kind == "command" {
+		reply := commands.Run(commands.Ctx{Name: s.cfg.Name, Notify: s}, a.Text)
+		s.mu.Lock()
+		sess.reply = reply
+		if sess.cache != nil {
+			st := s.composeMirror(sess.cache.grid, sess.cache.status, sess.cache.title, sess.cache.awaiting)
+			if sg := sig(st); sg != sess.lastSig {
+				sess.lastSig = sg
+				echo = displayMessage(st)
+			}
+		}
+		s.mu.Unlock()
 	}
 
 	switch a.Kind {
@@ -746,7 +762,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 		"current":  s.currentName(),
 		"sessions": s.sessionNames(),
 		"exists":   exists,
-		"notify":   s.cfg.Notify,
+		"notify":   s.NotifyEnabled(),
 		"awaiting": awaiting,
 	})
 }

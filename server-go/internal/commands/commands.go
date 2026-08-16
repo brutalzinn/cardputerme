@@ -7,8 +7,16 @@ import (
 	"cardputerme/internal/input"
 )
 
+// NotifySwitch is the slice of the server a command may touch. Deliberately
+// this narrow: a command gets what it needs, never the whole Server.
+type NotifySwitch interface {
+	NotifyEnabled() bool
+	SetNotify(bool)
+}
+
 type Ctx struct {
-	Name string
+	Name   string
+	Notify NotifySwitch
 }
 
 type Command struct {

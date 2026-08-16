@@ -61,6 +61,25 @@ func toneMessage(freq, ms int) string {
 	return `{"type":"sound","freq":` + strconv.Itoa(freq) + `,"ms":` + strconv.Itoa(ms) + `}`
 }
 
+// NotifyEnabled/SetNotify are the slice of the server that `;notify` may touch.
+// Live state, not the startup Config copy — the whole point is changing it from
+// the device without restarting the exposure.
+func (s *Server) NotifyEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.notify
+}
+
+func (s *Server) SetNotify(v bool) {
+	s.mu.Lock()
+	s.notify = v
+	s.mu.Unlock()
+	log.Printf("[notify] alerts %s", map[bool]string{true: "on", false: "off"}[v])
+	if !v {
+		s.setLed(ledOff)
+	}
+}
+
 func (s *Server) setLed(l led) {
 	msg := ledMessage(l)
 	s.mu.Lock()
@@ -92,7 +111,12 @@ func (s *Server) playNotifySound() {
 	s.hub.broadcast(toneMessage(1200, 90))
 }
 
+// signalAttention is the ONE place alerts leave the server, so `;notify 0`
+// silences every channel — sound and LED — rather than just the beep.
 func (s *Server) signalAttention() {
+	if !s.NotifyEnabled() {
+		return
+	}
 	s.setLed(ledAttention)
 	s.playNotifySound()
 }

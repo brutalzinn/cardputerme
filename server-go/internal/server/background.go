@@ -40,7 +40,7 @@ func (s *Server) scheduleCheck(name string) {
 func (s *Server) checkSession(name string) {
 	s.mu.Lock()
 	sess, ok := s.sessions[name]
-	notify := s.cfg.Notify
+	notify := s.notify
 	s.mu.Unlock()
 	if !ok {
 		return
