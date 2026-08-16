@@ -68,6 +68,10 @@ func (g *Gauge) Disturb(now time.Time) {
 func (g *Gauge) Observe(r Reading) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
+	if r.External != g.wired {
+		g.regimeChanged()
+	}
 	g.wired = r.External
 	if g.settling(r.At) {
 		return
@@ -96,6 +100,16 @@ func (g *Gauge) Status() (int, bool, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.shown, g.known, g.charging()
+}
+
+// regimeChanged drops the sample window when the power source changes, because
+// charging (~4.2V) and discharging (~3.7V) are different regimes and a median
+// across both is meaningless. It deliberately KEEPS `known`: unplugging also
+// causes a power transition, so the next reading may be discarded by the settle
+// window, and clearing known would leave the bar empty until some later report.
+func (g *Gauge) regimeChanged() {
+	g.samples = nil
+	g.rising = false
 }
 
 func (g *Gauge) settling(now time.Time) bool {

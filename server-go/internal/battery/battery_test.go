@@ -202,3 +202,62 @@ func TestStatusMatchesTheIndividualReads(t *testing.T) {
 		t.Fatalf("got %d, charging=%v", pct, charging)
 	}
 }
+
+// Unplugging drops the rail from ~4.2V to ~3.7V. Those are different regimes,
+// so a median window holding charging-era samples pins the reading at 100%
+// long after the cable is out — seen on hardware: usb=false mv=3731 still
+// reported 100%.
+func TestUnpluggingResetsTheSmoothingWindow(t *testing.T) {
+	g := NewGauge(testPolicy())
+	at := base
+	for range 8 {
+		g.Observe(Reading{Millivolts: 4180, External: true, At: at})
+		at = at.Add(time.Second)
+	}
+	if pct, _ := g.Percent(); pct != 100 {
+		t.Fatalf("precondition: charging should read 100, got %d", pct)
+	}
+
+	g.Observe(Reading{Millivolts: 3731, External: false, At: at})
+	pct, _ := g.Percent()
+	if pct > 60 {
+		t.Fatalf("after unplugging at 3731mV the reading must fall to ~54%%, got %d%% — the window still holds charging samples", pct)
+	}
+}
+
+func TestPluggingInAlsoResetsTheWindow(t *testing.T) {
+	g := NewGauge(testPolicy())
+	at := base
+	for range 8 {
+		g.Observe(Reading{Millivolts: 3500, At: at})
+		at = at.Add(time.Second)
+	}
+	g.Observe(Reading{Millivolts: 4180, External: true, At: at})
+	if pct, _ := g.Percent(); pct < 90 {
+		t.Fatalf("plugging in at 4180mV should read ~100%%, got %d%%", pct)
+	}
+}
+
+// A regime change must never blank the display. Unplugging also triggers a
+// power transition, so the very next reading can land inside the settle window
+// and be discarded — if known were cleared, the bar would show NOTHING until
+// some later report arrived. Seen on hardware: no percentage at all on battery.
+func TestRegimeChangeNeverBlanksTheReading(t *testing.T) {
+	g := NewGauge(testPolicy())
+	at := base
+	for range 8 {
+		g.Observe(Reading{Millivolts: 4180, External: true, At: at})
+		at = at.Add(time.Second)
+	}
+	if _, known := g.Percent(); !known {
+		t.Fatal("precondition: should be known while charging")
+	}
+
+	// unplug, and the reading lands inside the post-transition settle window
+	g.Disturb(at)
+	g.Observe(Reading{Millivolts: 3731, External: false, At: at.Add(500 * time.Millisecond)})
+
+	if _, known := g.Percent(); !known {
+		t.Fatal("the bar must keep showing a value, not go blank, when a regime change coincides with a power transition")
+	}
+}
