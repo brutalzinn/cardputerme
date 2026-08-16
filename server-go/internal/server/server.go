@@ -409,7 +409,9 @@ func onExternalPower(usb bool, milliVolts, threshold int) bool {
 }
 
 func (s *Server) handleReport(usb bool, milliVolts int, now time.Time) {
-	s.applyPower(s.power.SetExternalPower(now, onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)))
+	external := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
+	log.Printf("[power] device reports usb=%v mv=%d (threshold %d) — external=%v", usb, milliVolts, s.cfg.UsbMilliVolts, external)
+	s.applyPower(s.power.SetExternalPower(now, external))
 }
 
 func (s *Server) handleKeyEvent(key, state string, now time.Time) {

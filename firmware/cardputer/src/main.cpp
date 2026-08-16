@@ -375,7 +375,7 @@ void sendReport(bool usb, int mv) {
 }
 
 void reportSupply(bool force) {
-  bool usb = (bool)Serial;
+  bool usb = HWCDC::isPlugged();
   int mv = M5Cardputer.Power.getBatteryVoltage();
   bool changed = force || (int)usb != g_lastUsb || abs(mv - g_lastMv) >= 40;
   if (!changed) return;
