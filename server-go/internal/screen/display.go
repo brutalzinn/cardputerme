@@ -27,9 +27,12 @@ type Cell struct {
 }
 
 type DisplayMessage struct {
-	Type   string `json:"type"`
-	Size   int    `json:"size"`
-	Body   []Cell `json:"body"`
+	Type string `json:"type"`
+	Size int    `json:"size"`
+	Body []Cell `json:"body"`
+	// Badge is a short server-chosen string for the device header — kept
+	// generic on purpose, so what it carries can change without a re-flash.
+	Badge  string `json:"badge"`
 	Status Cell   `json:"status"`
 }
 
@@ -44,6 +47,10 @@ func LineColor(text string, awaiting bool) uint16 {
 }
 
 func BuildDisplay(body []Line, statusText string, size int) DisplayMessage {
+	return BuildDisplayBadge(body, statusText, "", size)
+}
+
+func BuildDisplayBadge(body []Line, statusText, badge string, size int) DisplayMessage {
 	cells := make([]Cell, 0, len(body))
 	for _, l := range body {
 		cells = append(cells, Cell{Text: l.Text, Color: l.Color})
@@ -52,6 +59,7 @@ func BuildDisplay(body []Line, statusText string, size int) DisplayMessage {
 		Type:   "display",
 		Size:   size,
 		Body:   cells,
+		Badge:  badge,
 		Status: Cell{Text: statusText, Color: Colors.Status},
 	}
 }

@@ -2,6 +2,7 @@ package screen
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -39,8 +40,22 @@ func TestBuildDisplayEmpty(t *testing.T) {
 
 func TestDisplayJSONShape(t *testing.T) {
 	b, _ := json.Marshal(BuildDisplay([]Line{{"hi", 0xFFFF}}, "s", 3))
-	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"status":{"text":"s","color":2047}}`
+	want := `{"type":"display","size":3,"body":[{"text":"hi","color":65535}],"badge":"","status":{"text":"s","color":2047}}`
 	if string(b) != want {
+		t.Fatalf("json = %s", b)
+	}
+}
+
+// The badge is a short server-chosen string for the device header. It carries
+// the battery today; keeping it generic means what it shows can change without
+// a re-flash.
+func TestDisplayCarriesABadge(t *testing.T) {
+	msg := BuildDisplayBadge([]Line{{"hi", 0xFFFF}}, "s", "53%", 2)
+	if msg.Badge != "53%" {
+		t.Fatalf("badge = %q", msg.Badge)
+	}
+	b, _ := json.Marshal(msg)
+	if !strings.Contains(string(b), `"badge":"53%"`) {
 		t.Fatalf("json = %s", b)
 	}
 }

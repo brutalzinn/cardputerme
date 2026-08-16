@@ -74,6 +74,7 @@ type mirrorCache struct {
 type stateResult struct {
 	lines         []screen.Line
 	status        string
+	badge         string
 	size          int
 	sessionExists bool
 	awaiting      bool
@@ -309,6 +310,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 		return stateResult{
 			lines:         itemLines(items, s.pick, rows, cols),
 			status:        itemStatus(items, s.pick),
+			badge:         battery.Label(s.gauge.Status()),
 			size:          s.size,
 			sessionExists: true,
 		}
@@ -384,9 +386,8 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	bat := battery.Label(s.gauge.Status())
 	segs := []string{"[" + s.cfg.Name + "]"}
-	for _, seg := range []string{title, hint, bat} {
+	for _, seg := range []string{title, hint} {
 		if seg != "" {
 			segs = append(segs, seg)
 		}
@@ -396,7 +397,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: bar, size: s.size, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: bar, badge: battery.Label(s.gauge.Status()), size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;
@@ -404,7 +405,7 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 // so a keystroke echo never waits on a capture in flight.
 func (s *Server) stateFrom(pane string, ok bool) stateResult {
 	if !ok {
-		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", size: s.size}
+		return stateResult{lines: s.screenLines(noSession), status: "terminal gone", badge: battery.Label(s.gauge.Status()), size: s.size}
 	}
 	grid, status, title := splitScreen(pane, s.cfg.HidePrefixes)
 	// Detect a prompt over the SAME blank-trimmed content the device shows (the
@@ -427,13 +428,13 @@ func gridTail(grid []screen.Line, status string) string {
 }
 
 func displayMessage(st stateResult) string {
-	b, _ := json.Marshal(screen.BuildDisplay(st.lines, st.status, st.size))
+	b, _ := json.Marshal(screen.BuildDisplayBadge(st.lines, st.status, st.badge, st.size))
 	return string(b)
 }
 
 func sig(st stateResult) string {
 	b, _ := json.Marshal(st.lines)
-	return string(b) + st.status
+	return string(b) + st.status + st.badge
 }
 
 func (s *Server) pushIfChanged(force bool) {
@@ -538,7 +539,7 @@ func (s *Server) applyKeyNoSession(key string) input.Action {
 
 func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.applyPower(s.power.Wake(time.Now()))
-	s.setLed(ledOff)
+	s.dismissAlert()
 	if s.currentName() == "" {
 		return s.applyKeyNoSession(key)
 	}

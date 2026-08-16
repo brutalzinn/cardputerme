@@ -46,6 +46,7 @@ const unsigned long BEACON_TTL_MS = 6500;
 struct Line { String text; uint16_t color; };
 std::vector<Line> g_lines;
 String   g_status = "";
+String   g_badge = "";
 uint16_t g_statusColor = COL_ACCENT;
 bool     g_sessionExists = false;
 int      g_page = 0;
@@ -131,9 +132,10 @@ void drawHeader() {
   }
 
   String pos = String(g_lines.empty() ? 0 : g_page + 1) + "/" + String(pageCount());
-  d.setCursor(SCR_W - (int)pos.length() * 6 - 3, 4);
-  d.setTextColor(COL_TEXT, COL_HDR);
-  d.print(pos);
+  String tail = g_badge.length() ? g_badge + " " + pos : pos;
+  d.setCursor(SCR_W - (int)tail.length() * 6 - 3, 4);
+  d.setTextColor(COL_OK, COL_HDR);
+  d.print(tail);
 }
 
 void drawScrollbar() {
@@ -394,6 +396,11 @@ void playPending() {
 }
 
 void applySound(JsonDocument& doc) {
+  if (doc["stop"] | false) {
+    g_pendingSound = "";
+    M5Cardputer.Speaker.stop();
+    return;
+  }
   const char* url = doc["url"] | "";
   if (strlen(url) == 0) {
     M5Cardputer.Speaker.tone(doc["freq"] | 1200, doc["ms"] | 90);
@@ -405,6 +412,7 @@ void applySound(JsonDocument& doc) {
 void applyDisplay(JsonDocument& doc) {
   g_sessionExists = doc["sessionExists"] | true;
   g_size = doc["size"] | 2;
+  g_badge = String((const char*)(doc["badge"] | ""));
   JsonObject status = doc["status"];
   String newStatus = String((const char*)(status["text"] | ""));
   if (newStatus != g_status) g_statusOffset = 0;

@@ -124,6 +124,20 @@ func (s *Server) playNotifySound() {
 
 // signalAttention is the ONE place alerts leave the server, so `;notify 0`
 // silences every channel — sound and LED — rather than just the beep.
+func soundStopMessage() string { return `{"type":"sound","stop":true}` }
+
+// dismissAlert is what "I am here" looks like: a keypress stops the sound and
+// darkens the LED. The device decides nothing — it is told to stop.
+func (s *Server) dismissAlert() {
+	s.mu.Lock()
+	lit := s.lastLed != "" && s.lastLed != ledMessage(ledOff)
+	s.mu.Unlock()
+	if lit {
+		s.hub.broadcast(soundStopMessage())
+	}
+	s.setLed(ledOff)
+}
+
 func (s *Server) signalAttention() {
 	if !s.NotifyEnabled() {
 		return

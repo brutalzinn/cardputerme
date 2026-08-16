@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"cardputerme/internal/battery"
 	"cardputerme/internal/screen"
 	"cardputerme/internal/terminal"
 )
@@ -198,7 +199,7 @@ const noSessions = "No terminals here.\nRun cardputerme in\na project, or press\
 // works from here, so the user is never stranded.
 func (s *Server) pushNoSessions(force bool) {
 	s.mu.Lock()
-	st := stateResult{lines: s.screenLines(noSessions), status: "[" + s.cfg.Name + "]  no sessions", size: s.size}
+	st := stateResult{lines: s.screenLines(noSessions), status: "[" + s.cfg.Name + "]  no sessions", badge: battery.Label(s.gauge.Status()), size: s.size}
 	if s.picking {
 		st = s.composeMirror(nil, "", "", false)
 	}
