@@ -3,53 +3,34 @@ package server
 import (
 	"strings"
 	"testing"
-	"time"
-
-	"cardputerme/internal/battery"
 )
 
-// The user cannot read the battery on the device and asked for it plainly.
-// The status bar is the one region every firmware ever built has rendered from
-// server text, so it is where a value you must be able to trust belongs.
-func TestStatusBarAlwaysShowsTheBattery(t *testing.T) {
+// The battery moved entirely off the status bar (user, 2026-08-17): the
+// device draws its own battery and charging state directly now, so this
+// line must never compose a percentage again — that would be two sources
+// of truth disagreeing on the same fact.
+func TestStatusBarNoLongerShowsBattery(t *testing.T) {
 	s := withSession(New(Config{Name: "proj", Session: "proj", WrapCols: 20}))
-	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
 	st := s.composeMirror(nil, "", "", false)
-	if !strings.Contains(st.status, "50%") {
-		t.Fatalf("status = %q", st.status)
-	}
-}
-
-func TestStatusBarShowsChargingWithAPlus(t *testing.T) {
-	now := time.Now()
-	s := withSession(New(Config{Name: "proj", Session: "proj", WrapCols: 20}))
-	s.gauge.Observe(battery.Reading{Millivolts: 3900, External: true, At: now})
-	st := s.composeMirror(nil, "", "", false)
-	if !strings.Contains(st.status, "+75%") {
-		t.Fatalf("charging must be visible, status = %q", st.status)
+	if strings.Contains(st.status, "%") {
+		t.Fatalf("status bar must not compose a battery reading anymore, got %q", st.status)
 	}
 }
 
 // Past 39 characters the device marquees the bar (drawStatusBar), so anything
-// beyond that scrolls out of sight. A battery you have to wait for is not one
-// you can read at a glance.
+// beyond that scrolls out of sight.
 func TestStatusBarNeverOutgrowsTheScreen(t *testing.T) {
 	s := withSession(New(Config{Name: "proj", Session: "proj", WrapCols: 20}))
-	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
 	st := s.composeMirror(nil, strings.Repeat("hint ", 60), strings.Repeat("title ", 40), false)
 	if n := len([]rune(st.status)); n > statusMax {
 		t.Fatalf("status is %d runes (max %d): %q", n, statusMax, st.status)
 	}
-	if !strings.Contains(st.status, "50%") {
-		t.Fatalf("the battery must survive the truncation, got %q", st.status)
-	}
 	if !strings.Contains(st.status, "proj") {
-		t.Fatalf("the session name must survive too, got %q", st.status)
+		t.Fatalf("the session name must survive truncation, got %q", st.status)
 	}
 }
 
-// c0 and z2 are the defaults and say nothing. Spending six characters on them
-// is what used to leave no room for the battery.
+// c0 and z2 are the defaults and say nothing.
 func TestStatusBarOmitsDefaultColumnAndZoom(t *testing.T) {
 	s := withSession(New(Config{Name: "proj", Session: "proj", WrapCols: 20}))
 	st := s.composeMirror(nil, "", "", false)
@@ -74,15 +55,5 @@ func TestStatusBarShowsColumnAndZoomWhenTheyAreNotDefault(t *testing.T) {
 	}
 	if !strings.Contains(st.status, "c4") {
 		t.Fatalf("a scrolled column must be visible, got %q", st.status)
-	}
-}
-
-// An unread battery is not a flat one, and the slot must never be silently
-// missing — that is the bug being fixed.
-func TestStatusBarKeepsTheSlotBeforeAnyReading(t *testing.T) {
-	s := withSession(New(Config{Name: "proj", Session: "proj", WrapCols: 20}))
-	st := s.composeMirror(nil, "", "", false)
-	if !strings.Contains(st.status, unknownBattery) {
-		t.Fatalf("status = %q", st.status)
 	}
 }

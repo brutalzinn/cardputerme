@@ -105,14 +105,18 @@ func itemStatus(items []pickerItem, pick int) string {
 }
 
 // resolvePick turns a picker action into either a machine jump (a connect
-// frame the device acts on) or a local session switch. Caller must not hold mu.
-func (s *Server) resolvePick(a input.Action, items []pickerItem) (connect string, switchTo string) {
+// frame the device acts on) or a local session switch. pick is the scroll
+// position THE SCREEN WAS RENDERED WITH — the caller must pass the pre-key
+// value, since a digit press resolves to whatever row is on screen, not to
+// wherever Pick lands after InterpretKey (a "leave" action always zeroes
+// it). Caller must not hold mu.
+func (s *Server) resolvePick(a input.Action, items []pickerItem, pick int) (connect string, switchTo string) {
 	idx := -1
 	if a.Kind == "connect" {
 		idx = a.Index
 	}
 	if a.Kind == "connectRow" {
-		idx = pickerStart(s.pick, len(items), s.rows()) + a.Index
+		idx = pickerStart(pick, len(items), s.rows()) + a.Index
 	}
 	if idx < 0 || idx >= len(items) {
 		return "", ""

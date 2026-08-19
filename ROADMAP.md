@@ -1,5 +1,5 @@
 # cardputerme — Roadmap
-> Updated 2026-08-16. #1–#45 shipped; the cycle is **the device you don't have to watch**. Terse; `git log` holds detail.
+> Updated 2026-08-17. #1–#45 shipped; the cycle is **the device you don't have to watch**. Terse; `git log` holds detail.
 
 ## What is cardputerme
 **Expose ANY terminal to an M5Cardputer with one command.** `cardputerme [name]` (zsh alias → `bin/cardputer-server`) registers this terminal with **ONE Go server per machine** (#44) that owns many sessions on a free port (8001–8255) and broadcasts a **UDP beacon** (port 8000, 2s: `{app,v,name,port}`); the device hears every machine, lists machines **and** sessions in one server-rendered picker, and connects to the one you pick. NO mDNS, NO baked IP. Backend (tmux) invisible & swappable inside `internal/terminal/` only; the whole system = **our Go server + our firmware**. **Really dumb device**: it reports raw events and draws what it is told — body, header and status are all composed server-side (#45), so behaviour changes are server changes, never a re-flash. House rules: no hooks, no regex, no `else`, no model tokens, no code comments, KISS, TDD, **event-driven (no polling)**; device E2E is the user's. North star: **SSH-parity** — only diff vs ssh is the small screen; mirror the terminal's own colors + layout.
@@ -23,6 +23,43 @@ Next: **#38 — the AUTOMATIC half** *(tracker 479, started)*. An LLM can now pa
 
 **📅 Day 3 — unscheduled · reserved**
 Nothing scheduled. Day 3 exists to absorb Day 1–2 carry-over rather than to invent work.
+
+## Done 2026-08-17 (battery + charging move entirely to firmware)
+- **Battery display reverses #37/#45 — the device now owns it, deliberately.** User: *"we are moving
+  the battery manage and display entirely for cardputer device"* — reasoning explicitly given: *"if
+  cardputer doesnt have any session available user need always see the battery info."* #37/#45 put
+  battery derivation and header composition server-side on the theory that a decision belongs to the
+  server; the user overrode that specifically for this one fact, because a server-composed value is
+  invisible exactly when there is no session or no server to compose it. The device now reads
+  (`M5Cardputer.Power.getBatteryLevel()`), applies its own small deadband (`BAT_PCT_HYSTERESIS`, 2pts,
+  same idea as the existing `BAT_HYSTERESIS_MV`) and draws `g_batPct`/`g_batUsb` right-aligned in the
+  header (`drawBatteryIndicator`), in **both** the normal frame and the `!g_hadFrame` no-server
+  fallback. `--%` dim is still the placeholder before the first local sample — an unread battery is
+  still not a flat one. Server-side, `headerCellsFor`/`statusBar` carry no battery cell or parameter
+  at all anymore (`alertWidth` grew 26→33, the header space the battery cell used to reserve).
+  `internal/battery.Gauge` is **not deleted** — it still feeds #31's never-sleep-on-USB trend
+  inference and `/health` diagnostics, just never a displayed percentage.
+- **Charging now also puts the device into REAL ESP32 sleep — a new, explicit exception.** User:
+  *"when cardputer is recharging mode we need set device to fully sleep to charge correctly"* —
+  clarified, against the recommended default, to mean **true** sleep (radio off, WebSocket drops),
+  not just the existing backlight-off state. This deliberately reopens a decision this ROADMAP's
+  Parked section previously avoided specifically because it breaks the pager's WebSocket; the user
+  chose it anyway, so the device is unreachable while charge-sleeping, by design — the server queues
+  alerts for exactly this case. `beginChargeSleep()` tears down WiFi/WS the moment USB is plugged and
+  nothing is mid-alert, then `esp_deep_sleep_start()`s with a timer wakeup (60s while charging, 300s
+  once full); `RTC_DATA_ATTR` state survives the reset so `handleChargeWake()` can re-sample locally
+  with no radio at all and decide whether to keep sleeping. Unplugging (detected on the next poll)
+  resumes a normal cold boot.
+- **Green LED at full charge — briefly wakes the backlight rail on purpose.** User: *"display green
+  led when full recharged."* Hits the #39 hardware limit head-on: the RGB LED shares its power rail
+  with the backlight, so it physically cannot light with the screen fully off. `flashFullGreen()`
+  re-powers that rail for a few seconds to show green at `FULL_PCT` (99%), then returns to sleep —
+  the literal ask, chosen over a tone-only alternative. An unread alert (`g_ledPattern != "off"` or a
+  pending sound) blocks entry into charge-sleep until it clears: alerts still win.
+- Firmware compiled clean (`cardputer-adv`, flash 33.4%, RAM 15.5%) and **flashed to the live device**.
+  Server: `go test ./... && go vet ./...` green; `internal/battery` package and its tests untouched.
+  Docs updated (`llm/protocol.md`, `llm/project.md`) since this reverses a documented architectural
+  rule for one specific fact — the next session needs to read the reversal, not rediscover it.
 
 ## Done 2026-08-16 (the device earns your attention)
 - **The pager cycle — an LLM can page you, and the page survives.** User-directed: *"claude code should can send notification to connected cardputer like if stuck a lot of time doing something"* → *"we need expose api to do this"*. **`POST /notify {session,text,level}`** is the one funnel — the server learns nothing about the caller, so Claude Code, CI and cron are the same thing to it, and its OWN prompt detector goes through it too. **Alerts are an inbox** (cap 8, exact repeats collapse): one slot threw away what #44 was built for, since two projects finishing meant one was lost. **`;notify 0` silences the noise and still queues** — it used to *destroy* alerts, and four were lost that way on the live server. A keypress answers the session on screen, plus any alert naming a session this machine does not have (you cannot navigate to those, so acknowledging is the only possible response — they were otherwise immortal). **`delivered` stopped lying**: it meant ";notify is on", so with nothing connected the sound went into an empty client map and the caller was told it worked; now `notify && clients>0` with a `reason`. **Urgency `info`/`attention`/`urgent`** distinguished by TONE and LED colour, forced by two device limits — the firmware caches exactly ONE wav by URL (a second thrashes it and stalls rendering over blocking HTTP) and the pulse period is compile-time. The urgent burst is paced by re-arming a `deadline`, never a ticker. Verified on hardware.
@@ -73,16 +110,18 @@ Nothing scheduled. Day 3 exists to absorb Day 1–2 carry-over rather than to in
 Wi-Fi creds were once committed to `firmware/.env` (untracked + gitignored 2026-08-15; still in git history). **User decided NOT to rotate (2026-08-15) — accepted.** History scrub (`git filter-repo`/BFG + force-push) remains available if ever wanted; `firmware/cardputer/.pio/` (~344 MB) is also in history. No open action.
 
 ## Parked (post-attention cycle — not now)
-Firmware battery sampling (**done** in `7b3da1f`: 8-read average, hysteresis 40→80mV, and #45 removed the device's duplicate battery draw); `alertWidth`/`statusMax` are server-side constants standing in for device geometry — the device should report its character width the way it reports `usb`/`mv`/`wifi`; firmware `tickStatusMarquee` is now provably dead (the server clips to 39) and can go on the next flash; PTY backend (drop-in via the adapter → "expose ANY window", no tmux; user chose to keep tmux for now); cursor-anchored prompt detection; command snippets; session peek in picker; suppress display pushes while the screen is off; real ESP32 light sleep w/ DTIM (**unblocked only by `;notify sleep 0` — notifications are exactly what forces the WS socket to stay up**); #27 tip-row filtering beyond `HIDE_PREFIXES` (needs app-specific matching, which the house rules forbid); #32b `/view` browser mirror + `:link` QR (dropped — the cost is per-client composition, not the QR).
+Firmware battery sampling (**done** in `7b3da1f`: 8-read average, hysteresis 40→80mV, and #45 removed the device's duplicate battery draw); `alertWidth`/`statusMax` are server-side constants standing in for device geometry — the device should report its character width the way it reports `usb`/`mv`/`wifi`; firmware `tickStatusMarquee` is now provably dead (the server clips to 39) and can go on the next flash; PTY backend (drop-in via the adapter → "expose ANY window", no tmux; user chose to keep tmux for now); cursor-anchored prompt detection; command snippets; session peek in picker; suppress display pushes while the screen is off; real ESP32 sleep on **idle** (as opposed to charging, which now does sleep — see Done 2026-08-17): still blocked on the same reason, `;notify` needs the WS socket to stay up, and idle has no equivalent to charging's "nothing to render anyway" excuse; #27 tip-row filtering beyond `HIDE_PREFIXES` (needs app-specific matching, which the house rules forbid); #32b `/view` browser mirror + `:link` QR (dropped — the cost is per-client composition, not the QR).
 
 ---
 ## Reference
 - **Install:** `curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh` (checksum-verified; `CARDPUTERME_VERSION`/`CARDPUTERME_BIN_DIR` override). Release = push a `v*` tag (CI auto-publishes); native macOS Intel/ARM + Linux amd64/arm64, static.
 - **Run:** `cardputerme [name]` — **ONE server per machine** (#44), not per exposure. The CLI is a **client**: it reads `~/.cardputerme/server.port`, health-checks, and `POST`s `/sessions` to register this terminal; it starts the server only if none is listening. Free port 8001–8255, log `~/.cardputerme/server.log`; **the session is named after the project dir** (argv[1] or `NAME` override) while capture attaches to *this* terminal's tmux session (`TMUX_SESSION`/`SESSION`). One beacon per machine: UDP 8000 every 2s (subnet-directed + limited broadcast). REST: `GET /sessions`, `POST /sessions`, `GET /health` — what the `/cardputer` skill integrates against.
-- **⚠️ Device state (2026-08-16):** the Cardputer is **flat** (`mv≈3180`, 0%) and **unplugged**, so **nothing can be flashed**. The pending firmware changes (dead 15s repaint removed, `g_hadFrame` header fallback, `readCells`, and now the provably-dead `tickStatusMarquee`) **compile but are not on the device**. Everything since #45 is deliberately server-only.
+- **Device state (2026-08-17):** flashed and live — battery/charging ownership (above) is on the
+  actual device, not just compiled. `tickStatusMarquee` is still provably dead (the server clips to
+  39) and can go on the next flash whenever one happens anyway.
 - **Release state:** latest tag is **`v0.0.4`** (at `115dc23`, #23) — **43 commits stale**, so `install.sh`'s `latest` ships without #24–#45. Cut `v0.1.0` (Day 1 #2): the wire broke, so **firmware and server must be upgraded together**.
 - **Settings (#41):** `~/.cardputerme/settings.json` — **persistence, not IPC** (one server holds them in memory since #44). A `;` command retunes every session, not just the one you're mirroring. Missing = defaults; corrupt = defaults + a loud log; unknown keys ignored; temp+rename writes. An explicitly-set env var overrides for **that process only**. `;notify 1|0` is the one switch — sound is the pocket channel, since the ADV LED cannot light with the screen off.
-- **Battery:** the ADV **cannot** report charge status (M5Stack: *"Cardputer and Cardputer-Adv cannot read battery charging status or battery current information"*; `isCharging()` → `charge_unknown` on plain-ADC boards). Charging is **inferred** server-side by `onExternalPower` = USB-CDC flag OR `mv >= USB_MV` (4200). The CDC flag only trips when a host opens the port, so a dumb wall charger falls back to the voltage threshold alone.
+- **Battery (moved to firmware, 2026-08-17):** the ADV **cannot** report charge status (M5Stack: *"Cardputer and Cardputer-Adv cannot read battery charging status or battery current information"*; `isCharging()` → `charge_unknown` on plain-ADC boards). The device now infers charging itself from the `usb`-plugged flag alone and draws its own percentage — see Done 2026-08-17. Charging still separately drives #31's server-side sleep-inhibit via `onExternalPower` = USB-CDC flag OR `mv >= USB_MV` (4200), unrelated to what's on screen.
 - **Tests:** `cd server-go && go test ./...` · `go vet ./...` · `go run golang.org/x/tools/cmd/deadcode@latest -test ./...`. **Flash:** `cd firmware/cardputer && $PIO run -e cardputer-adv -t upload` (device `/dev/cu.usbmodem21201`; E2E is the user's; only Wi-Fi creds in `firmware/.env`).
 - **Screen sleep:** server owns it (`ext-idle-notify-v1` shape) — dim 30s, off 2min (`DIM_AFTER_S`/`OFF_AFTER_S`, 0=never); any key wakes (first press swallowed), **G0 = sleep now / wake**; an unanswered prompt never sleeps. Sleep = backlight off, WS stays up (deep sleep would drop the socket).
 - **Pager API:** `POST /notify {"session","text","level"}` → `{delivered, queued, waiting, clients, reason}`. Levels `info`/`attention`/`urgent`; absent means `attention`, so no caller has to set it. `delivered` = `;notify` on AND a device connected; `queued` is always true — an alert is never dropped. The `/cardputer` skill documents **when** to page, which matters more than the endpoint: a device that cries wolf gets ignored.

@@ -11,11 +11,12 @@ import (
 // being here. Mirrors maxChars in drawStatusBar.
 const statusMax = 39
 
-// statusBar is the one line every firmware ever built renders from server text.
-// The battery leads it because it is the fact the user must be able to trust;
-// the title and hint are what get truncated when space runs out, deliberately.
-func statusBar(bat, name, title, hint string, row, maxRow, col, size int) string {
-	head := bat + "  [" + name + "]"
+// statusBar is the one line every firmware ever built renders from server
+// text. The battery no longer leads it — the device draws its own battery
+// and charging state directly now, so this line is free to spend its whole
+// budget on title/hint, deliberately truncated when space runs out.
+func statusBar(name, title, hint string, row, maxRow, col, size int) string {
+	head := "[" + name + "]"
 	tail := counters(row, maxRow, col, size)
 
 	middle := strings.Join(nonEmpty(title, hint), "  ")

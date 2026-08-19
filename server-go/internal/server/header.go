@@ -3,12 +3,8 @@ package server
 import (
 	"log"
 
-	"cardputerme/internal/battery"
 	"cardputerme/internal/screen"
 )
-
-// unknownBattery keeps the slot occupied before the device has ever reported.
-const unknownBattery = "--%"
 
 // applyWifi takes the fact the device reported. Absent means the firmware
 // predates the field, not that the radio is down.
@@ -67,37 +63,18 @@ func (s *Server) headerCells() []screen.Cell {
 
 // headerCellsLocked composes what the device used to build from local state.
 // WiFi is a fact the device REPORTS; whether and how to show it is decided
-// here, so it can change without a re-flash (#45).
+// here, so it can change without a re-flash (#45). Battery is no longer a
+// part of this: the device now reads, derives and draws its own battery and
+// charging state directly, so it stays visible with no session and no
+// server at all — that's the whole reason it moved off this frame.
 func (s *Server) headerCellsLocked() []screen.Cell {
-	return s.headerCellsFor(s.batteryLabelLocked())
+	return s.headerCellsFor()
 }
 
-func (s *Server) headerCellsFor(bat string) []screen.Cell {
+func (s *Server) headerCellsFor() []screen.Cell {
 	cells := []screen.Cell{}
 	if text := s.alertTextLocked(); text != "" {
 		cells = append(cells, screen.Cell{Text: text + " ", Color: screen.Colors.Ask})
 	}
-	cells = append(cells, wifiCell(s.wifi))
-	return append(cells, batteryCell(bat))
-}
-
-// batteryLabelLocked is the one place the placeholder decision lives. Both the
-// header and the status bar go through it, and a frame reads it ONCE — reading
-// the gauge twice let a report land in between and put two different
-// percentages in the same frame.
-func (s *Server) batteryLabelLocked() string {
-	if label := battery.Label(s.gauge.Status()); label != "" {
-		return label
-	}
-	return unknownBattery
-}
-
-// batteryCell always occupies the slot: a reading that appears and disappears
-// cannot be read at a glance. An unknown one is drawn dim and as a placeholder,
-// never as 0% — an unread battery is not a flat one.
-func batteryCell(label string) screen.Cell {
-	if label == unknownBattery {
-		return screen.Cell{Text: "  " + label, Color: screen.Colors.Dim}
-	}
-	return screen.Cell{Text: "  " + label, Color: screen.Colors.Status}
+	return append(cells, wifiCell(s.wifi))
 }

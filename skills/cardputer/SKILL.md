@@ -72,13 +72,13 @@ Notifying does not require the session to be linked first, but it is far more us
 1. **Check tmux is installed.** Run `command -v tmux`. If missing, stop and tell the user:
    *"cardputerme captures your terminal through tmux and cannot run without it — install it with `brew install tmux` (macOS) or `sudo apt install tmux` (Ubuntu), then rerun /cardputer."* Nothing works without it.
 
-2. **Check this session is inside tmux.** Run:
+2. **Check this session is inside tmux.** Check the `$TMUX` env var:
    ```
-   tmux display-message -p '#{session_name}'
+   [ -n "$TMUX" ] && echo inside-tmux || echo not-inside-tmux
    ```
-   Do not use the printed name for anything else — the CLI resolves it itself.
+   **Do not use `tmux display-message -p '#{session_name}'` for this check** — it gives a false positive. Run with no `-t`, tmux happily reports whatever session it considers "current" on the server (e.g. some other terminal's session), even when the calling process is not attached to tmux at all. `$TMUX` is the one signal tmux itself sets only for processes actually inside it.
 
-   **If it errors, Claude Code is not inside tmux and must be restarted inside it.** A running process cannot be moved into tmux, so tell the user to relaunch — the conversation is resumed, nothing is lost:
+   **If `$TMUX` is empty, Claude Code is not inside tmux and must be restarted inside it.** A running process cannot be moved into tmux, so tell the user to relaunch — the conversation is resumed, nothing is lost:
    ```
    tmux new -s $(basename "$PWD") 'claude --continue'
    ```

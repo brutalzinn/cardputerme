@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"cardputerme/internal/battery"
 	"cardputerme/internal/commands"
 	"cardputerme/internal/discovery"
 	"cardputerme/internal/idle"
@@ -56,7 +55,6 @@ type Config struct {
 	RepeatDelay     time.Duration
 	RepeatInterval  time.Duration
 	PushDebounce    time.Duration
-	UsbMilliVolts   int
 	IdleExit        time.Duration
 	SoundsDir       string
 	SettingsPath    string
@@ -98,8 +96,6 @@ type Server struct {
 
 	deviceKnown  bool
 	deviceHeader bool
-	lastMv       int
-	devicePct    int
 	notify       bool
 	soundBase    string
 	lastNoSig    string
@@ -118,8 +114,6 @@ type Server struct {
 	power         *power.Tracker
 	powerDeadline deadline
 
-	gauge *battery.Gauge
-
 	idle         *idle.Tracker
 	idleDeadline deadline
 
@@ -137,16 +131,6 @@ const (
 	sizeMin  = 1
 	sizeMax  = 3
 )
-
-var batteryPolicy = battery.Policy{
-	MinMv:       3300,
-	MaxMv:       4100,
-	Window:      8,
-	Deadband:    3,
-	SettleAfter: 2 * time.Second,
-	RiseRate:    0.5,
-	RisePeriod:  30 * time.Second,
-}
 
 func sessionTarget(cfg Config) string {
 	if cfg.Session != "" {
@@ -185,7 +169,6 @@ func New(cfg Config) *Server {
 		notify:   startingNotify(cfg),
 		power:    power.NewTracker(power.Policy{DimAfter: cfg.DimAfter, OffAfter: cfg.OffAfter}, time.Now()),
 		repeat:   repeat.NewHolder(repeat.Policy{Delay: cfg.RepeatDelay, Interval: cfg.RepeatInterval, MaxHold: repeatMaxHold}),
-		gauge:    battery.NewGauge(batteryPolicy),
 		idle:     idle.NewTracker(idle.Policy{After: cfg.IdleExit}, time.Now()),
 	}
 }
@@ -396,16 +379,11 @@ func (s *Server) composeMirror(grid []screen.Line, status, title string, awaitin
 	if awaiting {
 		hint = "PROMPT: press a number"
 	}
-	// The battery rides the status bar as well as the header: the header is the
-	// newer, nicer home, but this line is the one EVERY firmware renders, so a
-	// value the user has to be able to trust must not depend on which build is
-	// on the device.
-	bat := s.batteryLabelLocked()
-	bar := statusBar(bat, s.cfg.Name, title, hint, s.sess.view.Row, maxRow, s.sess.view.Col, s.size)
+	bar := statusBar(s.cfg.Name, title, hint, s.sess.view.Row, maxRow, s.sess.view.Col, s.size)
 	if len(lines) == 0 {
 		lines = s.screenLines("(empty)")
 	}
-	return stateResult{lines: lines, status: bar, header: s.headerCellsFor(bat), size: s.size, sessionExists: true, awaiting: awaiting}
+	return stateResult{lines: lines, status: bar, header: s.headerCellsFor(), size: s.size, sessionExists: true, awaiting: awaiting}
 }
 
 // stateFrom renders a captured pane into the device state. The caller holds mu;
@@ -488,7 +466,6 @@ func powerMessage(st power.State) string {
 
 func (s *Server) applyPower(st power.State, changed bool) {
 	if changed {
-		s.gauge.Disturb(time.Now())
 		s.hub.broadcast(powerMessage(st))
 	}
 	s.armPowerTimer()
@@ -525,9 +502,10 @@ func (s *Server) applyKeyNoSession(key string) input.Action {
 		key,
 		input.KeyCtx{Beacons: len(items)},
 	)
+	oldPick := s.pick
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
-	connect, switchTo := s.resolvePick(res.Action, items)
+	connect, switchTo := s.resolvePick(res.Action, items, oldPick)
 	s.mu.Unlock()
 
 	if connect != "" {
@@ -559,10 +537,11 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 	s.sess.input = res.State.Input
 	s.sess.cmd = res.State.Cmd
 	s.sess.hist = res.State.Hist
+	oldPick := s.pick
 	s.picking = res.State.Picking
 	s.pick = res.State.Pick
 	a := res.Action
-	connect, switchTo := s.resolvePick(a, items)
+	connect, switchTo := s.resolvePick(a, items, oldPick)
 	switch a.Kind {
 	case "pan":
 		for i := 0; i < times; i++ {
@@ -630,26 +609,6 @@ func (s *Server) applyKeyTimes(key string, times int) input.Action {
 		s.hub.broadcastFrame(echo)
 	}
 	return a
-}
-
-func onExternalPower(usb bool, milliVolts, threshold int) bool {
-	if usb {
-		return true
-	}
-	return threshold > 0 && milliVolts >= threshold
-}
-
-func (s *Server) handleReport(usb bool, milliVolts, devicePct int, now time.Time) {
-	s.mu.Lock()
-	s.lastMv = milliVolts
-	s.devicePct = devicePct
-	s.mu.Unlock()
-	wired := onExternalPower(usb, milliVolts, s.cfg.UsbMilliVolts)
-	s.gauge.Observe(battery.Reading{Millivolts: milliVolts, External: wired, At: now})
-	pct, known, external := s.gauge.Status()
-	log.Printf("[power] device reports usb=%v mv=%d (threshold %d) — external=%v battery=%q", usb, milliVolts, s.cfg.UsbMilliVolts, external, battery.Label(pct, known, external))
-	s.applyPower(s.power.SetExternalPower(now, external))
-	s.schedulePush()
 }
 
 func (s *Server) handleKeyEvent(key, state string, now time.Time) {
@@ -731,10 +690,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			Key     string   `json:"key"`
 			Text    string   `json:"text"`
 			State   string   `json:"state"`
-			Usb     bool     `json:"usb"`
 			Wifi    *bool    `json:"wifi"`
-			Battery int      `json:"battery"`
-			Mv      int      `json:"mv"`
 			Heap    int      `json:"heap"`
 			HeapMin int      `json:"heapmin"`
 			List    []beacon `json:"list"`
@@ -750,7 +706,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		case "report":
 			log.Printf("[device] heap=%d minheap=%d", m.Heap, m.HeapMin)
 			s.applyWifi(m.Wifi)
-			s.handleReport(m.Usb, m.Mv, m.Battery, time.Now())
+			s.schedulePush()
 		case "beacons":
 			s.handleBeacons(m.List)
 		case "wake":
@@ -787,10 +743,6 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	if sess != nil {
 		exists = sess.backend.Exists()
 	}
-	pct, known, external := s.gauge.Status()
-	s.mu.Lock()
-	mv, devicePct := s.lastMv, s.devicePct
-	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
@@ -801,14 +753,10 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 		"exists":   exists,
 		"notify":   s.NotifyEnabled(),
 		"awaiting": awaiting,
-		// Everything below exists so a blank or wrong device screen can be
-		// diagnosed from here rather than by asking the user what they see.
-		"battery":        battery.Label(pct, known, external),
-		"mv":             mv,
-		"external":       external,
+		// Battery is the device's own concern end to end now — it owns reading,
+		// deriving and displaying it, so there is nothing left to diagnose here.
 		"clients":        s.hub.count(),
 		"renders_header": s.deviceRendersHeader(),
-		"device_battery": devicePct,
 	})
 }
 

@@ -5,9 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"cardputerme/internal/battery"
 )
 
 func health(t *testing.T, s *Server) map[string]any {
@@ -59,35 +56,23 @@ func TestLegacyFirmwareIsNotReadAsNoWifi(t *testing.T) {
 
 // The pager must be able to report its own liveness without the device in hand.
 // Diagnosing a blank screen by asking the user what they see is not a workflow.
+// Battery is deliberately absent: the device owns reading, deriving and
+// displaying it end to end now, so there is nothing left for /health to say.
 func TestHealthReportsWhatTheDeviceIsDoing(t *testing.T) {
 	s := New(Config{Name: "h", WrapCols: 20})
-	s.gauge.Observe(battery.Reading{Millivolts: 3700, At: time.Now()})
-	s.handleReport(false, 3700, 88, time.Now())
+	up := true
+	s.applyWifi(&up)
 
 	got := health(t, s)
-	for _, key := range []string{"battery", "mv", "external", "clients", "renders_header", "device_battery"} {
+	for _, key := range []string{"clients", "renders_header"} {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("/health is missing %q: %v", key, got)
 		}
 	}
-	if got["battery"] != "50%" {
-		t.Fatalf("battery = %v", got["battery"])
-	}
-	if got["mv"] != float64(3700) {
-		t.Fatalf("mv = %v", got["mv"])
-	}
 	if got["clients"] != float64(0) {
 		t.Fatalf("clients = %v", got["clients"])
 	}
-}
-
-// The device computes its own percentage and we deliberately ignore it (#37).
-// Keeping it visible in /health is the cross-check: if ours and theirs disagree
-// wildly the gauge is wrong, and if both are blank the device is.
-func TestHealthKeepsTheDeviceOwnPercentageAsACrossCheck(t *testing.T) {
-	s := New(Config{Name: "h", WrapCols: 20})
-	s.handleReport(false, 3700, 88, time.Now())
-	if got := health(t, s)["device_battery"]; got != float64(88) {
-		t.Fatalf("device_battery = %v", got)
+	if got["renders_header"] != true {
+		t.Fatalf("renders_header = %v", got["renders_header"])
 	}
 }

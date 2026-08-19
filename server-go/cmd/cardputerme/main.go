@@ -91,7 +91,6 @@ func main() {
 		SoundsDir:       envStr("SOUNDS_DIR", defaultSoundsDir()),
 		SettingsPath:    envStr("SETTINGS_PATH", defaultSettingsPath()),
 		NotifySound:     envStr("NOTIFY_SOUND", "notify.wav"),
-		UsbMilliVolts:   envInt("USB_MV", 4200),
 		HidePrefixes:    envList("HIDE_PREFIXES", "Tip:"),
 	}
 	if err := server.New(cfg).Run(); err != nil {

@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <vector>
+#include "esp_sleep.h"
 
 #ifndef ENV_WIFI_SSID
 #define ENV_WIFI_SSID "YOUR_WIFI_SSID"
@@ -34,6 +35,7 @@ const unsigned long BEACON_TTL_MS = 6500;
 #define WAV_MAX_BYTES 200000
 #define BAT_SAMPLES        8
 #define BAT_HYSTERESIS_MV  80
+#define BAT_PCT_HYSTERESIS 2
 
 #define COL_BG      0x0000
 #define COL_HDR     0x10A2
@@ -76,6 +78,11 @@ PowerState g_power = POWER_ON;
 
 bool wifiUp() { return WiFi.status() == WL_CONNECTED; }
 
+// Local battery display — owned entirely by the device, defined near the
+// sampling code below; declared here so drawHeader() can call it.
+String batteryText(uint16_t& color);
+void drawBatteryIndicator();
+
 int bodyBottom() {
   return SCR_H - STATUS_H;
 }
@@ -117,12 +124,14 @@ void drawHeader() {
   if (!g_hadFrame) {
     d.setTextColor(COL_WARN, COL_HDR);
     d.print(wifiUp() ? "connecting..." : "no wifi");
+    drawBatteryIndicator();
     return;
   }
   for (size_t i = 0; i < g_header.size(); i++) {
     d.setTextColor(g_header[i].color, COL_HDR);
     d.print(g_header[i].text);
   }
+  drawBatteryIndicator();
 }
 
 void drawScrollbar() {
@@ -434,6 +443,12 @@ int g_lastMv = -1;
 int g_lastUsb = -1;
 unsigned long g_supplyTick = 0;
 
+// Local battery display state — owned entirely by the device now, so it is
+// visible with no session and no server (-1 = never sampled; an unread
+// battery is not a flat one).
+int  g_batPct = -1;
+bool g_batUsb = false;
+
 void sendEvent(const char* type) {
   JsonDocument doc;
   doc["type"] = type;
@@ -473,9 +488,51 @@ int sampleMilliVolts() {
   return (int)(total / BAT_SAMPLES);
 }
 
-void reportSupply(bool force) {
-  bool usb = HWCDC::isPlugged();
-  int mv = sampleMilliVolts();
+// getBatteryLevel() returns a negative error code on this board (confirmed
+// on hardware, 2026-08-17) — silently ignored for months since the wire
+// field it fed was never consumed. getBatteryVoltage()/mv is proven
+// reliable (used throughout, including /health), so derive the percentage
+// from it directly with the same mapping M5Unified uses internally rather
+// than depend on the broken call.
+int batteryPercentFromMv(int mv) {
+  long level = ((long)(mv - 3300) * 100) / (4150 - 3350);
+  if (level < 0) return 0;
+  if (level > 100) return 100;
+  return (int)level;
+}
+
+// batteryText/drawBatteryIndicator: the display owns this now, independent
+// of whether a server frame has ever arrived. -1 means never sampled — an
+// unread battery must read as unknown, never as a flat 0%.
+String batteryText(uint16_t& color) {
+  if (g_batPct < 0) { color = COL_DIM; return "--%"; }
+  color = g_batUsb ? COL_ACCENT : COL_TEXT;
+  String pct = String(g_batPct) + "%";
+  return g_batUsb ? ("+" + pct) : pct;
+}
+
+void drawBatteryIndicator() {
+  auto& d = M5Cardputer.Display;
+  uint16_t color;
+  String text = batteryText(color);
+  const int w = 46;
+  d.fillRect(SCR_W - w, 0, w, HEADER_H, COL_HDR);
+  d.setTextSize(1);
+  d.setTextColor(color, COL_HDR);
+  d.drawRightString(text, SCR_W - 3, 4);
+}
+
+// updateBatteryDisplay applies its own small deadband on top of the caller's
+// mv sample so single-read ADC noise (~50mV, several percent points) can't
+// flicker the digits.
+void updateBatteryDisplay(bool usb, int mv) {
+  int pct = batteryPercentFromMv(mv);
+  if (g_batPct < 0 || abs(pct - g_batPct) >= BAT_PCT_HYSTERESIS) g_batPct = pct;
+  g_batUsb = usb;
+  drawBatteryIndicator();
+}
+
+void reportSupply(bool usb, int mv, bool force) {
   bool changed = force || (int)usb != g_lastUsb || abs(mv - g_lastMv) >= BAT_HYSTERESIS_MV;
   if (!changed) return;
   g_lastUsb = (int)usb;
@@ -487,7 +544,10 @@ void tickSupply() {
   unsigned long now = millis();
   if (now - g_supplyTick < 5000) return;
   g_supplyTick = now;
-  reportSupply(false);
+  bool usb = HWCDC::isPlugged();
+  int mv = sampleMilliVolts();
+  updateBatteryDisplay(usb, mv);
+  reportSupply(usb, mv, false);
 }
 
 uint8_t brightnessFor(PowerState p) {
@@ -527,7 +587,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_CONNECTED:
       wsConnected = true;
       redraw();
-      reportSupply(true);
+      reportSupply(HWCDC::isPlugged(), sampleMilliVolts(), true);
       sendBeacons();
       break;
     case WStype_DISCONNECTED:
@@ -542,7 +602,17 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       if (deserializeJson(doc, payload, length)) return;
       const char* t = doc["type"] | "";
       if (strcmp(t, "display") == 0) { applyDisplay(doc); return; }
-      if (strcmp(t, "power") == 0) { applyPower(powerFromName(doc["state"] | "on")); return; }
+      if (strcmp(t, "power") == 0) {
+        PowerState want = powerFromName(doc["state"] | "on");
+        // The server no longer knows about USB power — it can only ever
+        // command the passive idle ladder (dim/off), never a deliberate
+        // sleep (that's requestSleep(), a separate local path). On charge
+        // there is no battery to save, so the device overrides the ladder
+        // itself instead of asking the server to.
+        if (g_batUsb && want != POWER_ON) want = POWER_ON;
+        applyPower(want);
+        return;
+      }
       if (strcmp(t, "connect") == 0) {
         IPAddress ip;
         if (!ip.fromString((const char*)(doc["ip"] | ""))) return;
@@ -643,13 +713,121 @@ void handleKeyboard() {
   flushKeyEvents();
 }
 
+#define FULL_PCT            99
+#define CHARGE_POLL_S        60
+#define CHARGE_POLL_FULL_S  300
+#define FULL_FLASH_MS       3000
+#define CHARGE_SPLASH_MS    2000
+#define BOOT_SPLASH_MS      1500
+
+// Survives deep sleep (RAM is otherwise wiped on reset, lost on power-cycle)
+// — the only state that has to carry across a chip reset while the device
+// polls its own charge status with everything else powered down.
+RTC_DATA_ATTR bool rtc_charging = false;
+RTC_DATA_ATTR bool rtc_fullShown = false;
+
+bool alertActive() {
+  return g_ledPattern != "off" || g_pendingSound.length() > 0;
+}
+
+// True ESP32 sleep — radio off, WebSocket drops. Charging is a physical
+// fact independent of whether anyone is watching, so this always wins over
+// whatever the server last commanded, session or no session. Never
+// returns: the chip resets and setup() decides what to do on wake.
+void enterChargeSleep(uint32_t seconds) {
+  rtc_charging = true;
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
+  esp_deep_sleep_start();
+}
+
+// The LED shares its power rail with the backlight (#39 hardware limit), so
+// "green at full" needs the rail briefly back on — it cannot be LED-only.
+void flashFullGreen() {
+  M5Cardputer.Display.setBrightness(BRIGHT_DIM);
+  neopixelWrite(RGB_LED_PIN, 0, 255, 0);
+  delay(FULL_FLASH_MS);
+  neopixelWrite(RGB_LED_PIN, 0, 0, 0);
+  M5Cardputer.Display.setBrightness(BRIGHT_OFF);
+}
+
+// One splash the moment charge-sleep begins, so plugging in USB gives
+// visible confirmation before the screen goes dark for the rest of the
+// charge — never repeated on the 60s poll wakes, which stay silent/dark
+// so the screen-on time doesn't compete with the battery for USB current.
+void showChargingSplash() {
+  auto& d = M5Cardputer.Display;
+  d.setBrightness(BRIGHT_ON);
+  d.fillScreen(COL_BG);
+  d.setTextSize(2);
+  d.setTextColor(COL_ACCENT, COL_BG);
+  d.drawCenterString("Recharging...", SCR_W / 2, 44);
+  d.setTextSize(1);
+  d.setTextColor(COL_TEXT, COL_BG);
+  d.drawCenterString("+" + String(g_batPct) + "%", SCR_W / 2, 76);
+  delay(CHARGE_SPLASH_MS);
+}
+
+// Called once, from the normally-running state, the moment charging starts
+// (or is already true at boot) and no alert is waiting to be seen or heard
+// — an unread alert must finish first. Drops the connection deliberately;
+// the server queues alerts for exactly this case.
+void beginChargeSleep() {
+  webSocket.disconnect();
+  wsConnected = false;
+  WiFi.disconnect(true);
+  bool full = g_batPct >= FULL_PCT;
+  rtc_fullShown = full;
+  if (full) flashFullGreen();
+  if (!full) {
+    showChargingSplash();
+    M5Cardputer.Display.setBrightness(BRIGHT_OFF);
+  }
+  enterChargeSleep(full ? CHARGE_POLL_FULL_S : CHARGE_POLL_S);
+}
+
+// Runs at the very top of setup(), before WiFi/display bring-up, so a
+// charge-poll wake never pays for a reconnect it doesn't need. Returning
+// true is never actually observed — enterChargeSleep() resets the chip
+// instead of returning — but the early-return shape keeps setup() readable.
+bool handleChargeWake() {
+  bool timerWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+  if (!rtc_charging || !timerWake) { rtc_charging = false; return false; }
+
+  bool usb = HWCDC::isPlugged();
+  int pct = batteryPercentFromMv(sampleMilliVolts());
+  if (!usb) { rtc_charging = false; rtc_fullShown = false; return false; }
+
+  if (pct >= FULL_PCT && !rtc_fullShown) {
+    flashFullGreen();
+    rtc_fullShown = true;
+  }
+  enterChargeSleep(rtc_fullShown ? CHARGE_POLL_FULL_S : CHARGE_POLL_S);
+  return true;
+}
+
+void drawBootSplash() {
+  auto& d = M5Cardputer.Display;
+  d.fillScreen(COL_BG);
+  d.setTextSize(3);
+  d.setTextColor(COL_ACCENT, COL_BG);
+  d.drawCenterString("cardputerme", SCR_W / 2, 40);
+  d.setTextSize(1);
+  d.setTextColor(COL_DIM, COL_BG);
+  d.drawCenterString("by brutalzinn", SCR_W / 2, 80);
+  delay(BOOT_SPLASH_MS);
+}
+
 void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
   M5Cardputer.Speaker.setVolume(140);
+
+  if (handleChargeWake()) return;
+
   applyPower(POWER_ON);
+  drawBootSplash();
   M5Cardputer.Display.fillScreen(COL_BG);
 
   connectWifi();
@@ -671,7 +849,8 @@ void loop() {
   if (g_listDirty && wsConnected) { g_listDirty = false; sendBeacons(); }
   if (g_haveTarget && !wsConnected && foundIndex(g_targetIp, g_targetPort) < 0) leaveServer();
 
-  if (g_haveTarget && wsConnected) tickSupply();
+  tickSupply();
+  if (g_batUsb && g_batPct >= 0 && !alertActive()) beginChargeSleep();
   tickLed();
   playPending();
 

@@ -14,13 +14,14 @@ endef
 RELEASE_NOTES := Install: curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh$(NEWLINE)$(NEWLINE)Native builds — macOS (Intel + Apple Silicon) and Linux (amd64 + arm64), static (CGO off) so any Ubuntu version works. Requires tmux at runtime.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup test build flash release release-checksums release-upload release-publish clean
+.PHONY: help setup test build flash cardputer release release-checksums release-upload release-publish clean
 
 help:
 	@echo "make setup             install Go deps + create firmware/.env"
 	@echo "make test              run the server tests"
 	@echo "make build             build the server binary"
 	@echo "make flash             upload firmware to the Cardputer"
+	@echo "make cardputer         link this terminal to the cardputerme server"
 	@echo "make release           build CLI binaries into dist/ (override PLATFORMS=os/arch ...)"
 	@echo "make release-upload VERSION=vX.Y.Z    checksum dist/ and publish it to a GitHub Release"
 	@echo "make release-publish VERSION=vX.Y.Z   build every platform, then publish"
@@ -39,6 +40,9 @@ build:
 
 flash:
 	cd $(FW_DIR) && "$(PIO)" run -e cardputer-adv -t upload
+
+cardputer:
+	./bin/cardputer-server
 
 release:
 	rm -rf $(DIST) && mkdir -p $(DIST)

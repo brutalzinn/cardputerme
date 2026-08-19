@@ -3,9 +3,6 @@ package server
 import (
 	"strings"
 	"testing"
-	"time"
-
-	"cardputerme/internal/battery"
 )
 
 // #44 exists so a prompt in ANY session reaches you. One alert slot threw that
@@ -120,15 +117,16 @@ func TestOneWaitingShowsNoCount(t *testing.T) {
 	}
 }
 
-// The whole header is ~40 characters at text size 1. The "!n" suffix was added
-// after alertWidth was chosen, so a full inbox pushed the battery off the right
-// edge — precisely when the most alerts were waiting, and re-creating the bug
-// the status-bar battery was added to fix.
-func TestAFullInboxDoesNotPushTheBatteryOffScreen(t *testing.T) {
+// The whole header is ~40 characters at text size 1. The "!n" suffix was
+// added after alertWidth was chosen, and a full inbox once pushed the
+// (then server-composed) battery cell off the right edge — precisely when
+// the most alerts were waiting. The battery moved entirely off the header
+// since (the device draws its own now), but the header must still never
+// overflow what the device can render.
+func TestAFullInboxNeverOverflowsTheHeader(t *testing.T) {
 	s, srv := alertServer(t)
 	down := false
 	s.applyWifi(&down)
-	s.gauge.Observe(battery.Reading{Millivolts: 4200, External: true, At: time.Now()})
 	for i := 0; i < maxAlerts; i++ {
 		postNotify(t, srv.URL, `{"session":"project`+string(rune('a'+i))+`","text":"a very long alert line indeed"}`)
 	}
@@ -138,9 +136,6 @@ func TestAFullInboxDoesNotPushTheBatteryOffScreen(t *testing.T) {
 	}
 	if width > headerCols {
 		t.Fatalf("header is %d chars (max %d): %q", width, headerCols, headerText(s.headerCells()))
-	}
-	if !strings.Contains(headerText(s.headerCells()), "100%") {
-		t.Fatalf("the battery must survive a full inbox, got %q", headerText(s.headerCells()))
 	}
 }
 

@@ -3,6 +3,8 @@ package server
 import (
 	"strings"
 	"testing"
+
+	"cardputerme/internal/input"
 )
 
 func TestPickerItemsListsSessionsThenMachines(t *testing.T) {
@@ -99,5 +101,32 @@ func TestSwitchToIgnoresAnUnknownSession(t *testing.T) {
 	s.switchTo("ghost")
 	if s.currentName() != "gitme" {
 		t.Fatalf("an unknown name must not blank the view, got %q", s.currentName())
+	}
+}
+
+// A digit press resolves against the scroll offset the screen was drawn
+// with, not whatever InterpretKey leaves Pick at afterward (a "leave"
+// action always zeroes it) — regression for a bug where selecting a row
+// past the first screenful picked the wrong, unscrolled session.
+func TestDigitPressSelectsTheVisibleRowWhenScrolled(t *testing.T) {
+	s := New(Config{Name: "m", WrapCols: 20})
+	names := []string{"s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"}
+	for _, n := range names {
+		s.register(n, n, "/tmp")
+	}
+	if got := s.rows(); got != 6 {
+		t.Fatalf("precondition: rows() = %d, want 6", got)
+	}
+
+	s.applyKey(input.PickerKey)
+	for range 8 {
+		s.applyKey("down")
+	}
+	// pick=8 of 9, rows=6 -> window is [3,9), so row 6 (the last visible row)
+	// is absolute index 8: "s8".
+	s.applyKey("6")
+
+	if got := s.currentName(); got != "s8" {
+		t.Fatalf("digit-selected the wrong row while scrolled: got %q, want %q", got, "s8")
 	}
 }

@@ -22,10 +22,12 @@ const defaultAlert = "needs you"
 const headerCols = 40
 
 // alertWidth is what is left for the alert once the widest possible WiFi cell
-// ("NoWiFi", 6) and battery cell ("  +100%", 7) plus a separating space are
-// taken out of headerCols. The "!n" count lives INSIDE this budget — it was
-// added afterwards and pushed the battery off the screen.
-const alertWidth = headerCols - 6 - 7 - 1
+// ("NoWiFi", 6) plus a separating space are taken out of headerCols. The
+// battery no longer shares this header at all — the device draws its own —
+// so this budget grew by the 8 characters that cell used to cost. The "!n"
+// count lives INSIDE this budget — it was added afterwards and once pushed
+// the battery off the screen, back when the battery was still here.
+const alertWidth = headerCols - 6 - 1
 
 // maxAlerts bounds the inbox. A pager that remembers everything forever is a
 // log; what the user needs is the newest line and an honest count.
