@@ -10,6 +10,8 @@ curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install
 
 Open a terminal (or don't — a default session named `boot` is always there). Pick it on the Cardputer and start typing. That's the whole workflow.
 
+**See it in action:** [youtu.be/TQ2MkkuBy8w](https://youtu.be/TQ2MkkuBy8w)
+
 ---
 
 ## How it works
