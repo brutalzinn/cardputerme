@@ -10,7 +10,7 @@
     {
       "name": "cardputerme",
       "source": "./",
-      "description": "Ships the /cardputer skill: expose the current Claude Code session to an M5Cardputer and drive it from the device.",
+      "description": "Ships the /cardputer skill: notify you on an M5Cardputer when Claude Code needs your attention. Exposure is automatic now, so the skill covers paging only.",
       "category": "productivity",
       "keywords": ["cardputer", "terminal", "remote", "claude-code"]
     }

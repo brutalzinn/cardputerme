@@ -38,6 +38,11 @@ const maxAlerts = 8
 // and "gitme: waiting for y" is worse than saying less.
 const awaitingAlert = "waiting"
 
+// quietAlert is what the server says when a session's GRID stopped changing
+// for QuietAfter with the screen off — the deadline-driven twin of
+// awaitingAlert's tmux-event-driven detection.
+const quietAlert = "quiet"
+
 type alertRequest struct {
 	Session string `json:"session"`
 	Text    string `json:"text"`

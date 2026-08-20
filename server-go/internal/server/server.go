@@ -32,7 +32,7 @@ const (
 	promptTailRows      = 16
 	maxLines            = 90
 	historyMax          = 50
-	noSession           = "Terminal is gone.\nRun cardputerme on\nthe computer to\nexpose it again."
+	noSession           = "Terminal is gone.\nStart a new terminal\non the computer and\nit reappears here."
 	portStart           = 8001
 	portTries           = 255
 	repeatMaxHold       = 10 * time.Second
@@ -56,6 +56,7 @@ type Config struct {
 	RepeatInterval  time.Duration
 	PushDebounce    time.Duration
 	IdleExit        time.Duration
+	QuietAfter      time.Duration
 	SoundsDir       string
 	SettingsPath    string
 	NotifySound     string
@@ -855,6 +856,10 @@ func (s *Server) Run() error {
 		log.Printf("[expose] no terminal '%s' was running — created an empty one; run cardputerme from inside the terminal you want mirrored", target)
 	}
 	s.register(s.cfg.Name, target, s.cfg.SessionCwd)
+	s.discoverExisting(target)
+	if !terminal.InstallDiscoveryHook() {
+		log.Printf("[expose] could not install the tmux session-created hook — new sessions will need `cardputerme` run manually until it is")
+	}
 
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -862,6 +867,7 @@ func (s *Server) Run() error {
 	log.Printf("cardputerme — exposing '%s' on http://0.0.0.0:%d  (ws://…/ws)", s.cfg.Name, port)
 	log.Printf("  screen : dim after %v, off after %v (0 = never)", s.cfg.DimAfter, s.cfg.OffAfter)
 	log.Printf("  idle   : exit after %v with no device connected (0 = never)", s.cfg.IdleExit)
+	log.Printf("  quiet  : alert after %v of unchanged output with the screen off (0 = never)", s.cfg.QuietAfter)
 	if err := publishPort(port); err != nil {
 		log.Printf("[expose] could not publish the port (%v) — `cardputerme` in another project will start a second server instead of attaching", err)
 	}

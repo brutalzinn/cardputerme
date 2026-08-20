@@ -88,6 +88,7 @@ func main() {
 		RepeatInterval:  time.Duration(envInt("REPEAT_INTERVAL_MS", 90)) * time.Millisecond,
 		PushDebounce:    time.Duration(envInt("PUSH_DEBOUNCE_MS", 15)) * time.Millisecond,
 		IdleExit:        time.Duration(envInt("IDLE_EXIT_H", 12)) * time.Hour,
+		QuietAfter:      time.Duration(envInt("QUIET_AFTER_S", 60)) * time.Second,
 		SoundsDir:       envStr("SOUNDS_DIR", defaultSoundsDir()),
 		SettingsPath:    envStr("SETTINGS_PATH", defaultSettingsPath()),
 		NotifySound:     envStr("NOTIFY_SOUND", "notify.wav"),

@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
+	"cardputerme/internal/quiet"
 	"cardputerme/internal/screen"
 	"cardputerme/internal/terminal"
 )
@@ -31,6 +33,8 @@ type session struct {
 	lastAwaiting bool
 	stop         func()
 	check        deadline
+	quiet        *quiet.Tracker
+	quietCheck   deadline
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
@@ -128,6 +132,7 @@ func (s *Server) register(name, target, cwd string) *session {
 	}
 	sess := newSession(name, terminal.CreateBackend(target, s.cfg.ScrollbackLines))
 	sess.cwd = cwd
+	sess.quiet = quiet.NewTracker(quiet.Policy{After: s.cfg.QuietAfter}, time.Now())
 	s.sessions[name] = sess
 	s.order = append(s.order, name)
 	if s.sess == nil {
@@ -140,6 +145,23 @@ func (s *Server) register(name, target, cwd string) *session {
 		func() { s.emit(sessionEvent{name: name, kind: evGone}) },
 	)
 	return sess
+}
+
+// discoverExisting backfills every tmux session already running on the
+// machine at startup (#46) — the ONE time this reads the whole list. Every
+// session created afterwards announces itself via the tmux `session-created`
+// hook instead (see terminal.InstallDiscoveryHook), so this never repeats —
+// no polling. `already` is the tmux target Run() just registered itself
+// under and must be skipped here, or register()'s idempotency-by-name would
+// silently leave it alone anyway — skipping is just clearer than relying on
+// that.
+func (s *Server) discoverExisting(already string) {
+	for _, found := range terminal.ListSessions() {
+		if found.Name == already {
+			continue
+		}
+		s.register(found.Name, found.Name, found.Cwd)
+	}
 }
 
 // drop removes a session. A dying terminal must never take the others with it,
@@ -174,18 +196,14 @@ func (s *Server) drop(name string) {
 	}
 }
 
-// terminalGone drops one dead terminal. Only the LAST one leaving ends the
-// process — a machine server must not die because one project closed.
+// terminalGone drops one dead terminal. A machine server now auto-discovers
+// tmux sessions (#46), so it must survive owning zero of them — it stays up,
+// watching, ready for the next one. Only armIdleTimer (no device connected
+// for IdleExit) ends the process now.
 func (s *Server) terminalGone(name string) {
 	s.drop(name)
-	left := s.sessionNames()
-	log.Printf("[expose] terminal %q is gone — %d session(s) left", name, len(left))
-	if len(left) > 0 {
-		s.schedulePush()
-		return
-	}
-	log.Printf("[expose] no sessions left — shutting down")
-	s.shutdown()
+	log.Printf("[expose] terminal %q is gone — %d session(s) left", name, len(s.sessionNames()))
+	s.schedulePush()
 }
 
 // shutdown ends Run. Signalling beats os.Exit here: a library that kills the
@@ -202,7 +220,7 @@ func (s *Server) sessionNames() []string {
 	return out
 }
 
-const noSessions = "No terminals here.\nRun cardputerme in\na project, or press\nfn+esc to switch."
+const noSessions = "No terminals here\nyet. Open a new\nterminal and it\nappears automatically."
 
 // pushNoSessions renders a machine that owns no terminals. The picker still
 // works from here, so the user is never stranded.

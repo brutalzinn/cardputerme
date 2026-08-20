@@ -1,7 +1,7 @@
 {
   "name": "cardputerme",
   "displayName": "cardputerme",
-  "description": "Expose your current Claude Code session to an M5Cardputer over Wi-Fi — watch and drive Claude from the pocket device. Ships a /cardputer command that runs the cardputerme CLI on this tmux session.",
+  "description": "Notify you on an M5Cardputer when Claude Code needs your attention. Every tmux session is exposed to the device automatically now — this plugin ships only the /cardputer command that pages you via POST /notify.",
   "version": "0.1.0",
   "author": {
     "name": "Roberto Paes"

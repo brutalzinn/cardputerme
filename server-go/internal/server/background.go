@@ -1,7 +1,11 @@
 package server
 
 import (
+	"strings"
 	"time"
+
+	"cardputerme/internal/power"
+	"cardputerme/internal/screen"
 )
 
 // backgroundCheck debounces prompt detection for sessions nobody is looking at.
@@ -57,11 +61,48 @@ func (s *Server) checkSession(name string) {
 	sess.lastAwaiting = awaiting
 	s.mu.Unlock()
 
-	if !fire {
-		return
+	if fire {
+		s.raiseAlert(name, awaitingAlert, attention)
+		if s.onNotify != nil {
+			s.onNotify(name)
+		}
 	}
-	s.raiseAlert(name, awaitingAlert, attention)
-	if s.onNotify != nil {
-		s.onNotify(name)
+
+	s.checkQuiet(name, sess, grid, time.Now())
+}
+
+// checkQuiet is #38's half: a deadline armed off the last GRID change (not
+// the raw frame — the status row's spinner ticks every second even when
+// nothing else moves). It rides checkSession deliberately — checkSession
+// already runs on every tmux change (frequent while a spinner is live) AND
+// is safe to re-run redundantly, which is exactly what re-checking a truly
+// silent session later needs. `now` is explicit so tests never sleep.
+func (s *Server) checkQuiet(name string, sess *session, grid []screen.Line, now time.Time) {
+	sess.quiet.Contact(now, gridContent(grid))
+
+	wait := sess.quiet.Until(now)
+	if wait <= 0 && sess.quiet.Due(now) {
+		if s.power.State() == power.Off && s.NotifyEnabled() {
+			sess.quiet.Consume(now)
+			s.raiseAlert(name, quietAlert, attention)
+			if s.onNotify != nil {
+				s.onNotify(name)
+			}
+		} else {
+			// Suppressed (screen on, or ;notify 0) — don't consume; a human
+			// may still be looking. Re-poll after another full window
+			// rather than nag every backgroundCheck tick.
+			wait = s.cfg.QuietAfter
+		}
 	}
+	sess.quietCheck.arm(wait, func() { s.checkSession(name) })
+}
+
+func gridContent(grid []screen.Line) string {
+	var sb strings.Builder
+	for _, l := range grid {
+		sb.WriteString(l.Text)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }

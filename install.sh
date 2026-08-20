@@ -111,4 +111,111 @@ case ":$PATH:" in
   *) say "add it to your PATH:  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc" ;;
 esac
 
-say "run 'cardputerme' inside a tmux terminal, then pick it on the Cardputer"
+# --- auto-exposure (#46): every tmux session exposes itself, no command needed ---
+
+HOOK_CMD='run-shell -b "cd '"'"'#{pane_current_path}'"'"' && SESSION='"'"'#{session_name}'"'"' cardputerme '"'"'#{session_name}'"'"' >>$HOME/.cardputerme/hook.log 2>&1"'
+TMUX_CONF="$HOME/.tmux.conf"
+# NOTE: wrapping HOOK_CMD in single quotes here would collide with the single
+# quotes already inside it (around each #{...}) and truncate the parsed
+# argument the moment tmux's OWN config-file tokenizer hit the first one —
+# verified empirically (`tmux show-hooks -g` came back empty). Double quotes
+# with the inner ones escaped is the form tmux's parser actually accepts;
+# the direct `tmux set-hook` argv call below needs no such escaping since it
+# is never re-tokenized as text.
+HOOK_LINE='set-hook -g session-created "run-shell -b \"cd '"'"'#{pane_current_path}'"'"' && SESSION='"'"'#{session_name}'"'"' cardputerme '"'"'#{session_name}'"'"' >>$HOME/.cardputerme/hook.log 2>&1\""'
+
+if [ -f "$TMUX_CONF" ] && grep -qF 'set-hook -g session-created' "$TMUX_CONF" 2>/dev/null; then
+  say "tmux auto-expose hook already present in $TMUX_CONF"
+else
+  printf '\n# cardputerme: expose every new tmux session automatically\n%s\n' "$HOOK_LINE" >>"$TMUX_CONF"
+  say "added the auto-expose hook to $TMUX_CONF"
+fi
+if command -v tmux >/dev/null 2>&1 && tmux info >/dev/null 2>&1; then
+  tmux set-hook -g session-created "$HOOK_CMD" 2>/dev/null && say "applied the hook to the tmux server already running"
+fi
+
+# A "boot" tmux session is what makes cardputerme usable before you ever open a
+# terminal: it keeps the tmux server alive (so the hook above has something to
+# attach to) and gives the Cardputer something to show with zero terminals open.
+#
+# This doubles as the watchdog: `cardputerme boot` alone only recreates the
+# SERVER if it died (EnsureSession only runs on a fresh spawn, never over the
+# attach-via-HTTP path) — it does nothing if "boot" itself was killed while the
+# server keeps running. Recreating the tmux session first, unconditionally,
+# covers both failures with one idempotent line; the OS scheduler re-runs it
+# periodically (StartInterval/timer below) rather than anything in Go polling.
+BOOT_CMD="tmux has-session -t boot >/dev/null 2>&1 || tmux new-session -d -s boot -c \"\$HOME\"; $BIN_DIR/cardputerme boot"
+case "$OS" in
+  darwin)
+    AGENT_DIR="$HOME/Library/LaunchAgents"
+    AGENT_FILE="$AGENT_DIR/com.cardputerme.boot.plist"
+    mkdir -p "$AGENT_DIR"
+    cat >"$AGENT_FILE" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.cardputerme.boot</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-lc</string>
+		<string>$BOOT_CMD</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>$HOME</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>StandardOutPath</key>
+	<string>$HOME/.cardputerme/boot.log</string>
+	<key>StandardErrorPath</key>
+	<string>$HOME/.cardputerme/boot.log</string>
+</dict>
+</plist>
+PLIST
+    mkdir -p "$HOME/.cardputerme"
+    launchctl unload "$AGENT_FILE" >/dev/null 2>&1 || true
+    if launchctl load -w "$AGENT_FILE" >/dev/null 2>&1; then
+      say "boot session will start at login (and starting now): $AGENT_FILE"
+    else
+      say "wrote $AGENT_FILE but could not load it — run: launchctl load -w $AGENT_FILE"
+    fi
+    ;;
+  linux)
+    UNIT_DIR="$HOME/.config/systemd/user"
+    SERVICE_FILE="$UNIT_DIR/cardputerme-boot.service"
+    TIMER_FILE="$UNIT_DIR/cardputerme-boot.timer"
+    mkdir -p "$UNIT_DIR" "$HOME/.cardputerme"
+    cat >"$SERVICE_FILE" <<UNIT
+[Unit]
+Description=cardputerme boot session (keeps tmux + cardputerme alive)
+
+[Service]
+Type=oneshot
+WorkingDirectory=$HOME
+ExecStart=/bin/sh -lc '$BOOT_CMD'
+UNIT
+    cat >"$TIMER_FILE" <<TIMER
+[Unit]
+Description=Run cardputerme-boot at login and every 60s (watchdog)
+
+[Timer]
+OnStartupSec=5
+OnUnitActiveSec=60
+Unit=cardputerme-boot.service
+
+[Install]
+WantedBy=timers.target
+TIMER
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload >/dev/null 2>&1 && systemctl --user enable --now cardputerme-boot.timer >/dev/null 2>&1; then
+      say "boot session watchdog running (every 60s): $TIMER_FILE"
+    else
+      say "wrote $SERVICE_FILE + $TIMER_FILE but could not enable them — run: systemctl --user enable --now cardputerme-boot.timer"
+    fi
+    ;;
+esac
+
+say "every tmux session now exposes itself automatically — nothing left to run"
