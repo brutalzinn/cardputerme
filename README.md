@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install
 
 Open a terminal (or don't — a default session named `boot` is always there). Pick it on the Cardputer and start typing. That's the whole workflow.
 
-**See it in action:** [youtu.be/TQ2MkkuBy8w](https://youtu.be/TQ2MkkuBy8w)
+**See it in action:** [youtu.be/dTU2-G5nL3Q](https://youtu.be/dTU2-G5nL3Q)
 
 ---
 
@@ -55,7 +55,7 @@ The device is a thin renderer: the server owns the input buffer, history, viewpo
 curl -fsSL https://raw.githubusercontent.com/brutalzinn/cardputerme/main/install.sh | sh
 ```
 
-Grabs the matching binary from the latest [GitHub Release](https://github.com/brutalzinn/cardputerme/releases), verifies its checksum and installs `cardputerme` into `/usr/local/bin` (or `~/.local/bin` when that is not writable). 
+Grabs the matching binary from the latest [GitHub Release](https://github.com/brutalzinn/cardputerme/releases), verifies its checksum and installs `cardputerme` into `/usr/local/bin` (or `~/.local/bin` when that is not writable).
 
 Then, so nothing needs to be run by hand afterward, the installer also:
 
@@ -89,7 +89,6 @@ The Cardputer and your computer must be on the **same Wi-Fi network** (the beaco
 
 Nothing to do — open a tmux session (`tmux new -s myproject`, or just start typing in the default `boot` session) and it appears on the device within a couple of seconds. The tmux hook installed by `install.sh` handles it.
 
-
 Re-running the same name just says "already exposed". Each exposure prints a log path under `~/.cardputerme/<name>.log`. The server stays up even with zero terminals exposed (it's what watches for the next one) — it only exits after a configurable idle stretch with no device connected.
 
 ### Connect (on the Cardputer)
@@ -97,7 +96,6 @@ Re-running the same name just says "already exposed". Each exposure prints a log
 1. It joins Wi-Fi, then shows the **server list** — each row is `name` + `IP:port`. If there's only one, it auto-connects.
 2. Press the **number** next to an exposure to connect.
 3. You now see that terminal mirrored live. Type — it's a real shell.
-
 
 ### Keys
 
@@ -200,7 +198,4 @@ make flash      # upload firmware to the Cardputer
 make release    # cross-compile CLI binaries into dist/ (macOS + Linux)
 ```
 
-
-
 The tmux backend lives only in `internal/terminal/` — a PTY backend can drop in behind the same interface. The device does no content logic, so most changes are server-side and need no re-flash.
-
