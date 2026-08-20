@@ -857,8 +857,9 @@ func (s *Server) Run() error {
 	}
 	s.register(s.cfg.Name, target, s.cfg.SessionCwd)
 	s.discoverExisting(target)
-	if !terminal.InstallDiscoveryHook() {
-		log.Printf("[expose] could not install the tmux session-created hook — new sessions will need `cardputerme` run manually until it is")
+	if err := terminal.InstallDiscoveryHook(); err != nil {
+		log.Printf("[expose] fatal: could not install the tmux session-created hook: %v", err)
+		return fmt.Errorf("install tmux session-created hook: %w", err)
 	}
 
 	mux := http.NewServeMux()

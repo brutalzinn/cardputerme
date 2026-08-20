@@ -1,6 +1,11 @@
 package terminal
 
-import "strings"
+import (
+	_ "embed"
+	"errors"
+	"os/exec"
+	"strings"
+)
 
 // SessionInfo is one tmux session found on the machine — enough to register
 // it (name = tmux target, cwd = where it started).
@@ -45,12 +50,27 @@ func discoveryHookArgs() []string {
 	return []string{"set-hook", "-g", "session-created", discoveryHookCmd}
 }
 
+//go:embed scripts/install-tmux-hook.sh
+var installHookScript string
+
 // InstallDiscoveryHook (re-)arms tmux's own session-created notification so a
-// brand-new session exposes itself with zero manual commands. Idempotent —
-// setting the same hook twice is harmless — so Run() calls this on every
-// startup rather than trusting install.sh's one-time ~/.tmux.conf write to
-// have survived a tmux server restart.
-func InstallDiscoveryHook() bool {
-	code, _ := tmux(discoveryHookArgs()...)
-	return code == 0
+// brand-new session exposes itself with zero manual commands. It runs the
+// embedded install-tmux-hook.sh (see scripts/), which both applies the hook
+// to the tmux server already running AND persists it to ~/.tmux.conf so it
+// survives a `tmux kill-server` — a bare `tmux set-hook` call does not.
+// Idempotent, so Run() calls this on every startup.
+//
+// A failure here is not cosmetic: it means new tmux sessions will silently
+// never expose themselves, which defeats the entire point of the server, so
+// the caller is expected to treat a non-nil error as fatal.
+func InstallDiscoveryHook() error {
+	out, err := exec.Command("bash", "-c", installHookScript).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return errors.New(msg)
+	}
+	return nil
 }

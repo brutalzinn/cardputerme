@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -97,8 +98,8 @@ func TestInstallDiscoveryHookIsReflectedByTmux(t *testing.T) {
 	}
 	defer exec.Command("tmux", "kill-session", "-t", name).Run()
 
-	if !InstallDiscoveryHook() {
-		t.Fatal("InstallDiscoveryHook reported failure")
+	if err := InstallDiscoveryHook(); err != nil {
+		t.Fatalf("InstallDiscoveryHook reported failure: %v", err)
 	}
 	out, err := exec.Command("tmux", "show-hooks", "-g").Output()
 	if err != nil {
@@ -106,5 +107,44 @@ func TestInstallDiscoveryHookIsReflectedByTmux(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "session-created") {
 		t.Fatalf("show-hooks -g did not list session-created: %s", out)
+	}
+}
+
+// installHookScript's failure branches matter as much as its success path:
+// InstallDiscoveryHook's caller (server.Run) treats any error as fatal, so a
+// false negative here would mean the server refuses to start when it should
+// not, and a false positive would mean it silently starts without the hook.
+// Exercised directly against the embedded script text — with PATH and HOME
+// overridden — so this never touches the real tmux server the rest of the
+// suite (and the developer's own machine) depends on.
+func TestInstallHookScriptFailsWithoutTmuxOnPath(t *testing.T) {
+	cmd := exec.Command("bash", "-c", installHookScript)
+	cmd.Env = []string{"PATH=/nonexistent", "HOME=" + t.TempDir()}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected failure with no tmux on PATH, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "tmux is not installed") {
+		t.Fatalf("expected a tmux-not-installed message, got: %s", out)
+	}
+}
+
+func TestInstallHookScriptFailsWithoutARunningTmuxServer(t *testing.T) {
+	skipWithoutTmux(t)
+	home := t.TempDir()
+	cmd := exec.Command("bash", "-c", installHookScript)
+	cmd.Env = append(os.Environ(), "HOME="+home, "TMUX_TMPDIR="+home)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected failure with no tmux server running, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "no tmux server is running") {
+		t.Fatalf("expected a no-server message, got: %s", out)
+	}
+	// The hook line is still persisted even though the live apply failed —
+	// that half is unconditional so a later tmux server start still picks it up.
+	conf, rerr := os.ReadFile(home + "/.tmux.conf")
+	if rerr != nil || !strings.Contains(string(conf), "session-created") {
+		t.Fatalf(".tmux.conf was not written with the hook: %v %s", rerr, conf)
 	}
 }
